@@ -1,0 +1,70 @@
+#!/bin/bash
+# gaw — git add worktree wrapper
+# Usage: gaw <path> [<branch>]
+#
+# Creates a new git worktree, then runs setup-worktree from it.
+# All arguments are passed through to 'git worktree add'.
+
+set -euo pipefail
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: gaw <path> [<branch>]
+
+Creates a new git worktree and runs setup-worktree on it.
+All arguments are passed through to 'git worktree add'.
+
+Examples:
+  gaw feat/new-feature          # worktree at feat/new-feature for branch feat/new-feature
+  gaw develop main              # worktree at develop from branch main
+  gaw --detach feat/experiment  # detached worktree
+EOF
+    exit 1
+}
+
+if [ $# -lt 1 ]; then
+    usage
+fi
+
+# ---- Extract the path (first non-flag argument) ----
+# We need this to know where to cd to after git worktree add.
+# Handle flags that consume the next argument: -b, -B, --branch, --reason
+path=""
+skip_next=false
+for arg in "$@"; do
+    if $skip_next; then
+        skip_next=false
+        continue
+    fi
+    case "$arg" in
+        -b|-B|--branch|--reason)
+            skip_next=true
+            ;;
+        --)
+            # Everything after -- is positional; take the next arg as path
+            ;;
+        -*)
+            # Other flags (--detach, --force, --lock, --checkout, etc.)
+            ;;
+        *)
+            path="$arg"
+            break
+            ;;
+    esac
+done
+
+if [ -z "$path" ]; then
+    echo "Error: could not determine worktree path from arguments." >&2
+    usage
+fi
+
+# Expand leading tilde in path (e.g., ~/projects/foo)
+path="${path/#\~/$HOME}"
+
+# ---- Create the worktree ----
+git worktree add "$@"
+
+# ---- Run setup ----
+# The path may be relative to CWD or absolute — cd handles both.
+cd "$path" || { echo "Error: could not cd to '$path'"; exit 1; }
+exec setup-worktree

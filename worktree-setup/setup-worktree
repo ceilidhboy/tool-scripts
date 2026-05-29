@@ -1,0 +1,196 @@
+#!/bin/bash
+# setup-worktree — set up a Laravel worktree after checking it out
+# Usage: setup-worktree [--bun|--npm|--no-frontend|--dry-run] [<path>]
+#
+# Traverses up from the worktree root to find the parent .env file,
+# then symlinks .env, copies .mcp.json (if absent), and runs the
+# standard Laravel bootstrapping commands.
+
+set -euo pipefail
+
+# ---- Config ----
+FRONTEND="auto"   # auto | bun | npm | none
+DRY_RUN=false
+
+# ---- Helpers ----
+info()  { printf "  \e[32m✓\e[0m %s\n" "$1"; }
+warn()  { printf "  \e[33m⚠\e[0m %s\n" "$1"; }
+err()   { printf "  \e[31m✗\e[0m %s\n" "$1" >&2; }
+run() {
+    if $DRY_RUN; then
+        printf "  [dry-run] $\e[2m %s\e[0m\n" "$*"
+    else
+        "$@"
+    fi
+}
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: setup-worktree [--bun|--npm|--no-frontend|--dry-run] [<path>]
+
+Sets up a Laravel worktree after checking it out.  If <path> is given,
+cds there first.  Otherwise uses the current directory.
+
+Flags:
+  --bun           Force bun install (even without bun.lock)
+  --npm           Force npm install (even without package-lock.json)
+  --no-frontend   Skip frontend dependency install entirely
+  --dry-run       Print what would be done without executing anything
+  --help, -h      Show this message
+EOF
+    exit 1
+}
+
+# ---- Argument parsing ----
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --bun)          FRONTEND="bun";       shift ;;
+        --npm)          FRONTEND="npm";       shift ;;
+        --no-frontend)  FRONTEND="none";      shift ;;
+        --dry-run)      DRY_RUN=true;         shift ;;
+        --help|-h)      usage ;;
+        --)             shift; break ;;
+        -*)
+            err "Unknown option: $1"
+            usage
+            ;;
+        *)
+            # First positional argument = path to worktree
+            if [ -z "${worktree_path:-}" ]; then
+                worktree_path="$1"
+            else
+                err "Unexpected argument: $1"
+                usage
+            fi
+            shift
+            ;;
+    esac
+done
+
+# If a path was provided, cd to it
+if [ -n "${worktree_path:-}" ]; then
+    # Expand tilde
+    worktree_path="${worktree_path/#\~/$HOME}"
+    cd "$worktree_path" || { err "Could not cd to '$worktree_path'"; exit 1; }
+fi
+
+WORKTREE_ROOT="$(pwd)"
+echo "Worktree root: $WORKTREE_ROOT"
+
+# Verify we're at a Laravel project root
+if [ ! -f "$WORKTREE_ROOT/composer.json" ]; then
+    err "This doesn't look like a Laravel project root (no composer.json found)."
+    err "Run setup-worktree from the worktree root directory."
+    exit 1
+fi
+
+# ---- Find parent root (directory with .env) ----
+# If .env exists in the worktree itself, we skip it during traversal
+# so we find the true parent .env instead.
+PARENT_ROOT=""
+target="$WORKTREE_ROOT"
+while [ "$target" != "/" ]; do
+    if [ -f "$target/.env" ] && [ "$target" != "$WORKTREE_ROOT" ]; then
+        PARENT_ROOT="$target"
+        break
+    fi
+    target="$(dirname "$target")"
+done
+
+if [ -z "$PARENT_ROOT" ]; then
+    err "Could not find a .env file in any parent directory."
+    err "Have you run this from inside a Laravel worktree?"
+    exit 1
+fi
+
+echo "Parent root: $PARENT_ROOT"
+echo ""
+
+# ---- 1. Symlink .env ----
+if [ -e "$WORKTREE_ROOT/.env" ]; then
+    warn "$WORKTREE_ROOT/.env already exists — aborting to protect it."
+    err "Delete it and re-run setup-worktree if you want to proceed."
+    exit 1
+fi
+
+run ln -s "$PARENT_ROOT/.env" "$WORKTREE_ROOT/.env"
+info "Symlinked .env"
+
+# ---- 2. Copy .mcp.json (only if absent) ----
+if [ ! -e "$WORKTREE_ROOT/.mcp.json" ]; then
+    if [ -f "$PARENT_ROOT/.mcp.json" ]; then
+        run cp "$PARENT_ROOT/.mcp.json" "$WORKTREE_ROOT/.mcp.json"
+        info "Copied .mcp.json"
+    else
+        warn "No .mcp.json found at parent root, skipping"
+    fi
+else
+    warn ".mcp.json already exists in worktree — skipping copy"
+fi
+
+# ---- 3. composer install ----
+if [ -f "$WORKTREE_ROOT/composer.json" ]; then
+    echo ""
+    echo "--- composer install ---"
+    run composer install
+    info "composer install completed"
+else
+    warn "No composer.json found, skipping composer install"
+fi
+
+# ---- 4. php artisan storage:link ----
+if [ -f "$WORKTREE_ROOT/artisan" ]; then
+    echo ""
+    echo "--- php artisan storage:link ---"
+    run php artisan storage:link
+    info "storage:link completed"
+else
+    warn "No artisan found, skipping storage:link"
+fi
+
+# ---- 5. Frontend dependencies ----
+echo ""
+echo "--- Frontend dependencies ---"
+
+install_frontend() {
+    local manager="$1"
+    local lockfile="$2"
+    local install_cmd="$3"
+
+    if [ -f "$WORKTREE_ROOT/$lockfile" ] || [ "$FRONTEND" = "$manager" ]; then
+        echo "Detected $manager ($lockfile) — running $install_cmd"
+        run $install_cmd
+        info "$install_cmd completed"
+        return 0
+    fi
+    return 1
+}
+
+case "$FRONTEND" in
+    auto)
+        install_frontend "bun"  "bun.lock"      "bun install"  ||
+        install_frontend "bun"  "bun.lockb"     "bun install"  ||
+        install_frontend "npm"  "package-lock.json" "npm install" ||
+        install_frontend "yarn" "yarn.lock"      "yarn install" ||
+        install_frontend "pnpm" "pnpm-lock.yaml" "pnpm install" ||
+            { [ -f "$WORKTREE_ROOT/package.json" ] && \
+              warn "package.json found but no lockfile — skipping"; } || true
+        ;;
+    bun)
+        run bun install
+        info "bun install completed"
+        ;;
+    npm)
+        run npm install
+        info "npm install completed"
+        ;;
+    none)
+        echo "Skipping frontend install (--no-frontend)"
+        ;;
+esac
+
+# ---- Done ----
+echo ""
+echo "============================================"
+echo "  Worktree setup complete!"
+echo "============================================"
