@@ -200,36 +200,7 @@ else
     warn ".mcp.json already exists in worktree — skipping"
 fi
 
-# ---- 3. Share SQLite database across worktrees ----
-# Only applies if DB_CONNECTION is sqlite
-DB_CONNECTION=$(grep '^DB_CONNECTION=' "$BUNDLE_ROOT/.env" 2>/dev/null | cut -d= -f2 || true)
-if [ "$DB_CONNECTION" = "sqlite" ]; then
-    DB_FILENAME=$(grep '^DB_DATABASE=' "$BUNDLE_ROOT/.env" 2>/dev/null | cut -d= -f2 || echo "database/database.sqlite")
-    DB_BASENAME=$(basename "$DB_FILENAME")
-
-    if [ -f "$BUNDLE_ROOT/$DB_BASENAME" ] && [ ! -e "$WORKTREE_ROOT/$DB_FILENAME" ]; then
-        # Bundle has database, worktree doesn't — create dir and symlink
-        run mkdir -p "$(dirname "$WORKTREE_ROOT/$DB_FILENAME")"
-        run ln -s "$(realpath --relative-to="$(dirname "$WORKTREE_ROOT/$DB_FILENAME")" "$BUNDLE_ROOT/$DB_BASENAME")" "$WORKTREE_ROOT/$DB_FILENAME"
-        info "Symlinked $DB_BASENAME"
-
-    elif [ -f "$WORKTREE_ROOT/$DB_FILENAME" ] && [ ! -f "$BUNDLE_ROOT/$DB_BASENAME" ]; then
-        # Worktree has database, bundle doesn't — adopt it
-        run mv "$WORKTREE_ROOT/$DB_FILENAME" "$BUNDLE_ROOT/$DB_BASENAME"
-        run mkdir -p "$(dirname "$WORKTREE_ROOT/$DB_FILENAME")"
-        run ln -s "$(realpath --relative-to="$(dirname "$WORKTREE_ROOT/$DB_FILENAME")" "$BUNDLE_ROOT/$DB_BASENAME")" "$WORKTREE_ROOT/$DB_FILENAME"
-        info "Adopted worktree $DB_BASENAME as shared bundle source"
-
-    elif [ ! -f "$BUNDLE_ROOT/$DB_BASENAME" ] && [ ! -f "$WORKTREE_ROOT/$DB_FILENAME" ]; then
-        # Neither has the database — create an empty one at bundle root
-        run mkdir -p "$(dirname "$WORKTREE_ROOT/$DB_FILENAME")"
-        run touch "$BUNDLE_ROOT/$DB_BASENAME"
-        run ln -s "$(realpath --relative-to="$(dirname "$WORKTREE_ROOT/$DB_FILENAME")" "$BUNDLE_ROOT/$DB_BASENAME")" "$WORKTREE_ROOT/$DB_FILENAME"
-        info "Created empty $DB_BASENAME at bundle root, symlinked"
-    fi
-fi
-
-# ---- 4. Package handling ----
+# ---- 3. Package handling ----
 echo ""
 
 # Define the full install routine (used by --full-install and auto fallback)
@@ -337,7 +308,7 @@ case "$PACKAGE_MODE" in
         ;;
 esac
 
-# ---- 5. php artisan storage:link ----
+# ---- 4. php artisan storage:link ----
 if [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- php artisan storage:link ---"
@@ -347,7 +318,7 @@ else
     warn "No artisan found, skipping storage:link"
 fi
 
-# ---- 6. php artisan key:generate ----
+# ---- 5. php artisan key:generate ----
 if [ "$KEY_MODE" != "skip" ] && [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- Application key ---"
