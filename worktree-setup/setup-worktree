@@ -101,9 +101,13 @@ echo "Worktree root: $WORKTREE_ROOT"
 
 # Verify we're at a Laravel project root
 if [ ! -f "$WORKTREE_ROOT/composer.json" ]; then
-    err "This doesn't look like a Laravel project root (no composer.json found)."
-    err "Run setup-worktree from the worktree root directory."
-    exit 1
+    echo ""
+    warn "This doesn't look like a Laravel project root (no composer.json found)."
+    warn "If this is a new project, create the Laravel app first:"
+    warn "  composer create-project laravel/laravel ."
+    warn "Then run setup-worktree again to symlink .env, storage, etc."
+    echo ""
+    exit 0
 fi
 
 # ---- Find bundle root (directory containing .bare/) ----
