@@ -1,16 +1,18 @@
 #!/bin/bash
 # setup-worktree — set up a Laravel worktree after checking it out
-# Usage: setup-worktree [--bun|--npm|--no-frontend|--dry-run] [<path>]
+# Usage: setup-worktree [options] [<path>]
 #
 # Traverses up from the worktree root to find the parent .env file,
-# then symlinks .env, copies .mcp.json (if absent), and runs the
-# standard Laravel bootstrapping commands.
+# then symlinks .env, copies .mcp.json (if absent), and handles
+# Laravel bootstrapping — including smart package management.
 
 set -euo pipefail
 
 # ---- Config ----
 FRONTEND="auto"   # auto | bun | npm | none
 DRY_RUN=false
+PACKAGE_MODE="auto"   # auto | full-install | no-packages
+KEY_MODE="prompt"     # prompt | generate | skip
 
 # ---- Helpers ----
 info()  { printf "  \e[32m✓\e[0m %s\n" "$1"; }
@@ -24,19 +26,37 @@ run() {
     fi
 }
 
-usage() {
-    cat >&2 <<'EOF'
-Usage: setup-worktree [--bun|--npm|--no-frontend|--dry-run] [<path>]
+show_help() {
+    cat >&1 <<'EOF'
+Usage: setup-worktree [options] [<path>]
 
 Sets up a Laravel worktree after checking it out.  If <path> is given,
 cds there first.  Otherwise uses the current directory.
 
-Flags:
-  --bun           Force bun install (even without bun.lock)
-  --npm           Force npm install (even without package-lock.json)
-  --no-frontend   Skip frontend dependency install entirely
-  --dry-run       Print what would be done without executing anything
-  --help, -h      Show this message
+Package management (smart default):
+  By default, setup-worktree looks for an existing develop or master
+  worktree to symlink vendor/ and node_modules/ from, avoiding costly
+  reinstalls.  If neither is found, a full install is performed.
+
+Options:
+  --full-install    Install packages directly (don't symlink from peer)
+  --no-packages     Skip all package handling entirely
+  --key             Auto-generate application key (no prompt)
+  --no-key          Skip application key generation entirely
+  --bun             Force bun install (even without bun.lock)
+  --npm             Force npm install (even without package-lock.json)
+  --no-frontend     Skip frontend dependency install
+  --dry-run         Print what would be done without executing anything
+  --help, -h        Show this message
+EOF
+    exit 0
+}
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: setup-worktree [options] [<path>]
+
+Run 'setup-worktree --help' for full usage.
 EOF
     exit 1
 }
@@ -44,18 +64,21 @@ EOF
 # ---- Argument parsing ----
 while [ $# -gt 0 ]; do
     case "$1" in
-        --bun)          FRONTEND="bun";       shift ;;
-        --npm)          FRONTEND="npm";       shift ;;
-        --no-frontend)  FRONTEND="none";      shift ;;
-        --dry-run)      DRY_RUN=true;         shift ;;
-        --help|-h)      usage ;;
-        --)             shift; break ;;
+        --full-install)  PACKAGE_MODE="full-install"; shift ;;
+        --no-packages)   PACKAGE_MODE="no-packages";  shift ;;
+        --key)           KEY_MODE="generate";          shift ;;
+        --no-key)        KEY_MODE="skip";              shift ;;
+        --bun)           FRONTEND="bun";              shift ;;
+        --npm)           FRONTEND="npm";              shift ;;
+        --no-frontend)   FRONTEND="none";             shift ;;
+        --dry-run)       DRY_RUN=true;                shift ;;
+        --help|-h)       show_help ;;
+        --)              shift; break ;;
         -*)
             err "Unknown option: $1"
             usage
             ;;
         *)
-            # First positional argument = path to worktree
             if [ -z "${worktree_path:-}" ]; then
                 worktree_path="$1"
             else
@@ -69,7 +92,6 @@ done
 
 # If a path was provided, cd to it
 if [ -n "${worktree_path:-}" ]; then
-    # Expand tilde
     worktree_path="${worktree_path/#\~/$HOME}"
     cd "$worktree_path" || { err "Could not cd to '$worktree_path'"; exit 1; }
 fi
@@ -84,27 +106,48 @@ if [ ! -f "$WORKTREE_ROOT/composer.json" ]; then
     exit 1
 fi
 
-# ---- Find parent root (directory with .env) ----
-# If .env exists in the worktree itself, we skip it during traversal
-# so we find the true parent .env instead.
-PARENT_ROOT=""
+# ---- Find bundle root (directory containing .bare/) ----
+BUNDLE_ROOT=""
 target="$WORKTREE_ROOT"
 while [ "$target" != "/" ]; do
-    if [ -f "$target/.env" ] && [ "$target" != "$WORKTREE_ROOT" ]; then
-        PARENT_ROOT="$target"
+    if [ -d "$target/.bare" ]; then
+        BUNDLE_ROOT="$target"
         break
     fi
     target="$(dirname "$target")"
 done
 
-if [ -z "$PARENT_ROOT" ]; then
-    err "Could not find a .env file in any parent directory."
-    err "Have you run this from inside a Laravel worktree?"
+if [ -z "$BUNDLE_ROOT" ]; then
+    err "Could not find a .bare directory in any parent directory."
+    err "Make sure you've cloned the bare repo before creating worktrees:"
+    err ""
+    err "  git clone --bare <url> .bare"
+    err "  echo 'gitdir: .bare' > .git"
     exit 1
 fi
 
-echo "Parent root: $PARENT_ROOT"
+echo "Bundle root: $BUNDLE_ROOT"
 echo ""
+
+# ---- Bootstrap: .git at bundle root ----
+if [ ! -f "$BUNDLE_ROOT/.git" ]; then
+    echo 'gitdir: .bare' > "$BUNDLE_ROOT/.git"
+    info "Created .git at bundle root"
+fi
+
+# ---- Bootstrap: .env at bundle root ----
+if [ ! -f "$BUNDLE_ROOT/.env" ]; then
+    if [ -f "$BUNDLE_ROOT/.env.example" ]; then
+        run cp "$BUNDLE_ROOT/.env.example" "$BUNDLE_ROOT/.env"
+        info "Created .env from .env.example at bundle root"
+        warn "⚠ Review and edit $BUNDLE_ROOT/.env with your secrets"
+        warn "⚠ Run 'php artisan key:generate' to set APP_KEY"
+    else
+        err "No .env.example found at bundle root ($BUNDLE_ROOT/.env.example)."
+        err "Cannot bootstrap .env. Create one manually."
+        exit 1
+    fi
+fi
 
 # ---- 1. Symlink .env ----
 if [ -e "$WORKTREE_ROOT/.env" ]; then
@@ -113,30 +156,134 @@ if [ -e "$WORKTREE_ROOT/.env" ]; then
     exit 1
 fi
 
-run ln -s "$PARENT_ROOT/.env" "$WORKTREE_ROOT/.env"
+run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.env")" "$WORKTREE_ROOT/.env"
 info "Symlinked .env"
 
-# ---- 2. Copy .mcp.json (only if absent) ----
+# ---- 2. Symlink .mcp.json ----
+MCP_MASTER="$HOME/.local/bin/.mcp.json"
+
 if [ ! -e "$WORKTREE_ROOT/.mcp.json" ]; then
-    if [ -f "$PARENT_ROOT/.mcp.json" ]; then
-        run cp "$PARENT_ROOT/.mcp.json" "$WORKTREE_ROOT/.mcp.json"
-        info "Copied .mcp.json"
+    if [ -f "$BUNDLE_ROOT/.mcp.json" ]; then
+        run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.mcp.json")" "$WORKTREE_ROOT/.mcp.json"
+        info "Symlinked .mcp.json from bundle root"
+    elif [ -f "$MCP_MASTER" ]; then
+        run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$MCP_MASTER")" "$WORKTREE_ROOT/.mcp.json"
+        info "Symlinked .mcp.json from master copy"
     else
-        warn "No .mcp.json found at parent root, skipping"
+        warn "No .mcp.json found at bundle root or master copy ($MCP_MASTER)"
+        warn "Create one at either location and re-run setup-worktree"
     fi
 else
-    warn ".mcp.json already exists in worktree — skipping copy"
+    warn ".mcp.json already exists in worktree — skipping"
 fi
 
-# ---- 3. composer install ----
-if [ -f "$WORKTREE_ROOT/composer.json" ]; then
+# ---- 3. Package handling ----
+echo ""
+
+# Define the full install routine (used by --full-install and auto fallback)
+do_full_install() {
+    # composer install
+    if [ -f "$WORKTREE_ROOT/composer.json" ]; then
+        echo ""
+        echo "--- composer install ---"
+        run composer install
+        info "composer install completed"
+    else
+        warn "No composer.json found, skipping composer install"
+    fi
+
+    # Frontend dependencies
     echo ""
-    echo "--- composer install ---"
-    run composer install
-    info "composer install completed"
-else
-    warn "No composer.json found, skipping composer install"
-fi
+    echo "--- Frontend dependencies ---"
+
+    install_frontend() {
+        local manager="$1"
+        local lockfile="$2"
+        local install_cmd="$3"
+
+        if [ -f "$WORKTREE_ROOT/$lockfile" ] || [ "$FRONTEND" = "$manager" ]; then
+            echo "Detected $manager ($lockfile) — running $install_cmd"
+            run $install_cmd
+            info "$install_cmd completed"
+            return 0
+        fi
+        return 1
+    }
+
+    case "$FRONTEND" in
+        auto)
+            install_frontend "bun"  "bun.lock"      "bun install --frozen-lockfile"  ||
+            install_frontend "bun"  "bun.lockb"     "bun install --frozen-lockfile"  ||
+            install_frontend "npm"  "package-lock.json" "npm ci" ||
+            install_frontend "yarn" "yarn.lock"      "yarn install --frozen-lockfile" ||
+            install_frontend "pnpm" "pnpm-lock.yaml" "pnpm install --frozen-lockfile" ||
+                { [ -f "$WORKTREE_ROOT/package.json" ] && \
+                  warn "package.json found but no lockfile — skipping"; } || true
+            ;;
+        bun)
+            run bun install --frozen-lockfile
+            info "bun install --frozen-lockfile completed"
+            ;;
+        npm)
+            run npm ci
+            info "npm ci completed"
+            ;;
+        none)
+            echo "Skipping frontend install (--no-frontend)"
+            ;;
+    esac
+}
+
+case "$PACKAGE_MODE" in
+    no-packages)
+        echo "--- Skipping all package handling (--no-packages) ---"
+        ;;
+
+    full-install)
+        echo "--- Full install mode (--full-install) ---"
+        do_full_install
+        ;;
+
+    auto)
+        # Smart default: look for a peer worktree to symlink from
+        PACKAGE_SOURCE=""
+        for candidate in "develop" "master"; do
+            candidate_dir="$BUNDLE_ROOT/$candidate"
+            if [ -f "$candidate_dir/vendor/autoload.php" ]; then
+                PACKAGE_SOURCE="$candidate_dir"
+                echo "Found package source: $PACKAGE_SOURCE"
+                break
+            fi
+        done
+
+        if [ -n "$PACKAGE_SOURCE" ]; then
+            echo "--- Symlinking packages from $(basename "$PACKAGE_SOURCE") ---"
+
+            # Symlink vendor
+            if [ -e "$WORKTREE_ROOT/vendor" ]; then
+                warn "vendor already exists — skipping symlink"
+            else
+                run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$PACKAGE_SOURCE/vendor")" "$WORKTREE_ROOT/vendor"
+                info "Symlinked vendor → $PACKAGE_SOURCE/vendor"
+            fi
+
+            # Symlink node_modules (if it exists in the source)
+            if [ -d "$PACKAGE_SOURCE/node_modules" ]; then
+                if [ -e "$WORKTREE_ROOT/node_modules" ]; then
+                    warn "node_modules already exists — skipping symlink"
+                else
+                    run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$PACKAGE_SOURCE/node_modules")" "$WORKTREE_ROOT/node_modules"
+                    info "Symlinked node_modules → $PACKAGE_SOURCE/node_modules"
+                fi
+            else
+                warn "node_modules not found in source — skipping symlink"
+            fi
+        else
+            echo "--- No package source found — performing full install ---"
+            do_full_install
+        fi
+        ;;
+esac
 
 # ---- 4. php artisan storage:link ----
 if [ -f "$WORKTREE_ROOT/artisan" ]; then
@@ -148,46 +295,33 @@ else
     warn "No artisan found, skipping storage:link"
 fi
 
-# ---- 5. Frontend dependencies ----
-echo ""
-echo "--- Frontend dependencies ---"
+# ---- 5. php artisan key:generate ----
+if [ "$KEY_MODE" != "skip" ] && [ -f "$WORKTREE_ROOT/artisan" ]; then
+    echo ""
+    echo "--- Application key ---"
 
-install_frontend() {
-    local manager="$1"
-    local lockfile="$2"
-    local install_cmd="$3"
-
-    if [ -f "$WORKTREE_ROOT/$lockfile" ] || [ "$FRONTEND" = "$manager" ]; then
-        echo "Detected $manager ($lockfile) — running $install_cmd"
-        run $install_cmd
-        info "$install_cmd completed"
-        return 0
+    if [ "$KEY_MODE" = "generate" ]; then
+        run php artisan key:generate
+        info "Application key generated"
+    elif [ "$KEY_MODE" = "prompt" ]; then
+        printf "  Would you like to generate an application key? [Y/n]: "
+        if ! read -r answer < /dev/tty 2>/dev/null; then
+            warn "Not a terminal — skipping key generation prompt"
+            warn "Run 'php artisan key:generate' manually when ready"
+        else
+            case "${answer:-Y}" in
+                [Nn]*)
+                    warn "Skipping key generation"
+                    warn "You can generate one later with: php artisan key:generate"
+                    ;;
+                *)
+                    run php artisan key:generate
+                    info "Application key generated"
+                    ;;
+            esac
+        fi
     fi
-    return 1
-}
-
-case "$FRONTEND" in
-    auto)
-        install_frontend "bun"  "bun.lock"      "bun install"  ||
-        install_frontend "bun"  "bun.lockb"     "bun install"  ||
-        install_frontend "npm"  "package-lock.json" "npm install" ||
-        install_frontend "yarn" "yarn.lock"      "yarn install" ||
-        install_frontend "pnpm" "pnpm-lock.yaml" "pnpm install" ||
-            { [ -f "$WORKTREE_ROOT/package.json" ] && \
-              warn "package.json found but no lockfile — skipping"; } || true
-        ;;
-    bun)
-        run bun install
-        info "bun install completed"
-        ;;
-    npm)
-        run npm install
-        info "npm install completed"
-        ;;
-    none)
-        echo "Skipping frontend install (--no-frontend)"
-        ;;
-esac
+fi
 
 # ---- Done ----
 echo ""
