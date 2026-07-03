@@ -58,7 +58,7 @@ do_init() {
 
     echo ""
     echo "Ready. You can now create worktrees:"
-    echo "  gaw develop main"
+    echo "  gaw develop"
     echo "  gaw feat/my-feature"
     echo ""
     exit 0
@@ -85,7 +85,7 @@ Examples:
   gaw --init                      # ensure .git pointer exists in current dir
   gaw --init ~/projects/my-app    # ensure .git pointer at a specific path
   gaw feat/new-feature            # worktree at feat/new-feature for branch feat/new-feature
-  gaw develop main                # worktree at develop from branch main
+  gaw develop                    # create develop branch + worktree from HEAD
   gaw --detach feat/experiment    # detached worktree
 EOF
     exit 0

@@ -143,29 +143,44 @@ if [ ! -f "$BUNDLE_ROOT/.git" ]; then
     info "Created .git at bundle root"
 fi
 
-# ---- Bootstrap: .env at bundle root ----
-if [ ! -f "$BUNDLE_ROOT/.env" ]; then
-    if [ -f "$BUNDLE_ROOT/.env.example" ]; then
-        run cp "$BUNDLE_ROOT/.env.example" "$BUNDLE_ROOT/.env"
-        info "Created .env from .env.example at bundle root"
-        warn "⚠ Review and edit $BUNDLE_ROOT/.env with your secrets"
-        warn "⚠ Run 'php artisan key:generate' to set APP_KEY"
+# ---- 1. Share .env across worktrees ----
+# Goal: .env lives at bundle root, each worktree symlinks to it.
+# Source can come from bundle root or worktree.
+
+if [ -f "$BUNDLE_ROOT/.env" ] && [ ! -e "$WORKTREE_ROOT/.env" ]; then
+    # Bundle has .env, worktree doesn't — symlink it
+    run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.env")" "$WORKTREE_ROOT/.env"
+    info "Symlinked .env"
+
+elif [ -f "$WORKTREE_ROOT/.env" ] && [ ! -f "$BUNDLE_ROOT/.env" ]; then
+    # Worktree has .env (e.g. from composer create-project), bundle doesn't — adopt it
+    run mv "$WORKTREE_ROOT/.env" "$BUNDLE_ROOT/.env"
+    run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.env")" "$WORKTREE_ROOT/.env"
+    info "Adopted worktree .env as shared bundle source"
+
+elif [ ! -f "$BUNDLE_ROOT/.env" ] && [ ! -f "$WORKTREE_ROOT/.env" ]; then
+    # Neither has .env — try to create one from .env.example
+    env_src=""
+    [ -f "$BUNDLE_ROOT/.env.example" ] && env_src="$BUNDLE_ROOT/.env.example"
+    [ -z "$env_src" ] && [ -f "$WORKTREE_ROOT/.env.example" ] && env_src="$WORKTREE_ROOT/.env.example"
+
+    if [ -n "$env_src" ]; then
+        run cp "$env_src" "$BUNDLE_ROOT/.env"
+        run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.env")" "$WORKTREE_ROOT/.env"
+        info "Created .env from $(basename "$env_src"), symlinked"
+        echo "    Review and edit $BUNDLE_ROOT/.env with your secrets"
+        echo "    Then run: php artisan key:generate"
     else
-        err "No .env.example found at bundle root ($BUNDLE_ROOT/.env.example)."
-        err "Cannot bootstrap .env. Create one manually."
-        exit 1
+        echo ""
+        echo "ℹ  No .env or .env.example found anywhere."
+        echo ""
+        echo "    If this is a new Laravel project, create .env manually:"
+        echo "      cp .env.example .env"
+        echo "      php artisan key:generate"
+        echo ""
+        exit 0
     fi
 fi
-
-# ---- 1. Symlink .env ----
-if [ -e "$WORKTREE_ROOT/.env" ]; then
-    warn "$WORKTREE_ROOT/.env already exists — aborting to protect it."
-    err "Delete it and re-run setup-worktree if you want to proceed."
-    exit 1
-fi
-
-run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.env")" "$WORKTREE_ROOT/.env"
-info "Symlinked .env"
 
 # ---- 2. Symlink .mcp.json ----
 MCP_MASTER="$HOME/.local/bin/.mcp.json"
