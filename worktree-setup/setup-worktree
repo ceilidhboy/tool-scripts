@@ -102,10 +102,12 @@ echo "Worktree root: $WORKTREE_ROOT"
 # Verify we're at a Laravel project root
 if [ ! -f "$WORKTREE_ROOT/composer.json" ]; then
     echo ""
-    warn "This doesn't look like a Laravel project root (no composer.json found)."
-    echo "    If this is a new project, create the Laravel app first:"
-    echo "      composer create-project laravel/laravel ."
-    echo "    Then run setup-worktree again to symlink .env, storage, etc."
+    warn "ATTENTION: This doesn't look like a Laravel project root (no composer.json found)."
+    echo ""
+    echo "If this is a new project, create the Laravel app first:"
+    echo "  composer create-project laravel/laravel ."
+    echo ""
+    echo "Then run setup-worktree again to symlink .env, storage, etc."
     echo ""
     exit 0
 fi
