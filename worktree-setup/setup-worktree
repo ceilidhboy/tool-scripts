@@ -323,7 +323,11 @@ if [ "$KEY_MODE" != "skip" ] && [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- Application key ---"
 
-    if [ "$KEY_MODE" = "generate" ]; then
+    # Check if .env already has an APP_KEY set
+    current_key=$(grep '^APP_KEY=' "$WORKTREE_ROOT/.env" 2>/dev/null || true)
+    if [ -n "$current_key" ] && [ "$current_key" != 'APP_KEY=' ]; then
+        info "APP_KEY already set — skipping key generation"
+    elif [ "$KEY_MODE" = "generate" ]; then
         run php artisan key:generate
         info "Application key generated"
     elif [ "$KEY_MODE" = "prompt" ]; then
