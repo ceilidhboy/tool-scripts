@@ -102,7 +102,7 @@ echo "Worktree root: $WORKTREE_ROOT"
 # Verify we're at a Laravel project root
 if [ ! -f "$WORKTREE_ROOT/composer.json" ]; then
     echo ""
-    echo "⚠ ATTENTION:"
+    echo "⚠  ATTENTION:"
     echo ""
     echo "This doesn't look like a Laravel project root (no composer.json found)."
     echo ""

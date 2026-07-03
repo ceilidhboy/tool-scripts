@@ -10,7 +10,7 @@ set -euo pipefail
 # Used by --init to bootstrap a bare repo + .git pointer at the bundle root.
 # Usage: do_init [<path>] [<url>]
 do_init() {
-    local init_path="" init_url=""
+    local init_path=""
     local parsed=false
 
     # Parse positional args, skip --init itself
@@ -21,8 +21,6 @@ do_init() {
         fi
         if [ -z "$init_path" ]; then
             init_path="$arg"
-        elif [ -z "$init_url" ]; then
-            init_url="$arg"
         fi
     done
 
@@ -37,65 +35,31 @@ do_init() {
     echo "Initialising at: $init_path"
     echo ""
 
-    # ---- 1. Bare repo ----
-    if [ -d ".bare" ]; then
-        echo "  ✓ .bare/ already exists — leaving it alone"
-    elif [ -n "$init_url" ]; then
-        echo "  Cloning bare repo from $init_url ..."
-        git clone --bare "$init_url" .bare
-        echo "  ✓ Cloned bare repo from $init_url"
-    else
-        git init --bare .bare
-        echo "  ✓ Created new bare repository"
+    # ---- 1. Check bare repo ----
+    if [ ! -d ".bare" ]; then
+        echo "⚠  No .bare/ directory found."
+        echo ""
+        echo "First, clone the bare repo from GitHub:"
+        echo "  git clone --bare git@github.com:Socially-Free/<repo>.git .bare"
+        echo ""
+        echo "Then run gaw --init again."
+        exit 1
     fi
+
+    echo "  ✓ .bare/ found"
 
     # ---- 2. .git pointer ----
     if [ -e ".git" ]; then
-        echo "  ⚠ .git already exists — leaving it alone"
+        echo "  ✓ .git pointer already exists"
     else
         echo 'gitdir: .bare' > .git
         echo "  ✓ Created .git pointer → .bare"
     fi
 
-    # ---- 3. Initial commit (if repo is empty) ----
-    # Use GIT_DIR to bypass bare repo restriction for checking/creating commits
-    if ! GIT_DIR=.bare git rev-parse HEAD >/dev/null 2>&1; then
-        echo ""
-        echo "  --- Creating initial commit ---"
-
-        # Gather everything that exists, excluding .bare
-        local existing_files=()
-        for f in * .*; do
-            [ "$f" = "." ] || [ "$f" = ".." ] || [ "$f" = ".bare" ] || [ "$f" = ".git" ] && continue
-            existing_files+=("$f")
-        done
-
-        if [ ${#existing_files[@]} -eq 0 ]; then
-            # Empty directory — create a README as a starting point
-            cat > README.md <<'INITEOF'
-# Project
-
-Initialised by gaw --init
-INITEOF
-            echo "  ✓ Created README.md"
-        fi
-
-        # Use GIT_DIR/GIT_WORK_TREE to bypass bare repo restriction
-        GIT_DIR=.bare GIT_WORK_TREE=. git add --all -- ':!.bare' ':!.git'
-        GIT_DIR=.bare GIT_WORK_TREE=. git commit -m "Initial commit"
-        echo "  ✓ Created initial commit"
-    else
-        echo "  ✓ Repository already has commits"
-    fi
-
     echo ""
-    echo "============================================"
-    echo "  gaw --init complete!"
-    echo "============================================"
-    echo ""
-    echo "  You can now create worktrees with:"
-    echo "    gaw develop main"
-    echo "    gaw feat/my-feature"
+    echo "Ready. You can now create worktrees:"
+    echo "  gaw develop main"
+    echo "  gaw feat/my-feature"
     echo ""
     exit 0
 }
@@ -108,11 +72,9 @@ Creates a new git worktree and runs setup-worktree on it.
 All unrecognised arguments are passed through to 'git worktree add'.
 
 Options:
-  --init [<path>] [<url>]   Bootstrap a bare repo + .git pointer at <path>
-                              (defaults to current directory). If <url> is given,
-                              clones it as a bare repo; otherwise creates a new one.
-                              If .bare/ already exists, it is left alone.
-                              Creates an initial commit if the repo is empty.
+  --init [<path>]           Ensure .git pointer exists at <path> (defaults to
+                              current directory). Checks .bare/ exists first and
+                              instructs you to clone it if not.
   --full-install            Install packages directly instead of symlinking
   --no-packages             Skip all package handling (no symlink, no install)
   --key                     Auto-generate application key (passes through to setup-worktree)
@@ -120,9 +82,8 @@ Options:
   --help, -h                Show this help message
 
 Examples:
-  gaw --init                      # init current directory with new bare repo
-  gaw --init ~/projects/my-app    # init at a specific path
-  gaw --init ~/projects/my-app git@github.com:user/repo.git  # clone bare from remote
+  gaw --init                      # ensure .git pointer exists in current dir
+  gaw --init ~/projects/my-app    # ensure .git pointer at a specific path
   gaw feat/new-feature            # worktree at feat/new-feature for branch feat/new-feature
   gaw develop main                # worktree at develop from branch main
   gaw --detach feat/experiment    # detached worktree
