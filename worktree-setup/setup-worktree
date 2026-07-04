@@ -188,10 +188,10 @@ MCP_MASTER="$HOME/.local/bin/.mcp.json"
 if [ ! -e "$WORKTREE_ROOT/.mcp.json" ]; then
     if [ -f "$BUNDLE_ROOT/.mcp.json" ]; then
         run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.mcp.json")" "$WORKTREE_ROOT/.mcp.json"
-        info "Symlinked .mcp.json from bundle root"
+        info "Symlinked .mcp.json → $BUNDLE_ROOT/.mcp.json"
     elif [ -f "$MCP_MASTER" ]; then
-        run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$MCP_MASTER")" "$WORKTREE_ROOT/.mcp.json"
-        info "Symlinked .mcp.json from master copy"
+        run ln -s "$MCP_MASTER" "$WORKTREE_ROOT/.mcp.json"
+        info "Symlinked .mcp.json → $HOME/.local/bin/.mcp.json"
     else
         warn "No .mcp.json found at bundle root or master copy ($MCP_MASTER)"
         warn "Create one at either location and re-run setup-worktree"
