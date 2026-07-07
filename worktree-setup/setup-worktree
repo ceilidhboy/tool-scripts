@@ -269,15 +269,31 @@ case "$PACKAGE_MODE" in
 
     auto)
         # Smart default: look for a peer worktree to symlink from
+        # Checks master first (preferred), then develop.
+        # Prefers a candidate whose vendor/ is a real directory (not a symlink
+        # pointing at another branch), so every worktree links directly to the
+        # source of truth rather than chaining through an intermediate branch.
         PACKAGE_SOURCE=""
-        for candidate in "develop" "master"; do
+        PACKAGE_SOURCE_FALLBACK=""
+        for candidate in "master" "develop"; do
             candidate_dir="$BUNDLE_ROOT/$candidate"
             if [ -f "$candidate_dir/vendor/autoload.php" ]; then
-                PACKAGE_SOURCE="$candidate_dir"
-                echo "Found package source: $PACKAGE_SOURCE"
-                break
+                if [ ! -L "$candidate_dir/vendor" ]; then
+                    PACKAGE_SOURCE="$candidate_dir"
+                    echo "Found package source: $PACKAGE_SOURCE (real packages)"
+                    break
+                else
+                    # vendor is a symlink — save as fallback in case no branch
+                    # has real packages
+                    [ -z "$PACKAGE_SOURCE_FALLBACK" ] && PACKAGE_SOURCE_FALLBACK="$candidate_dir"
+                fi
             fi
         done
+
+        if [ -z "$PACKAGE_SOURCE" ] && [ -n "$PACKAGE_SOURCE_FALLBACK" ]; then
+            PACKAGE_SOURCE="$PACKAGE_SOURCE_FALLBACK"
+            echo "Found package source: $PACKAGE_SOURCE (via symlink)"
+        fi
 
         if [ -n "$PACKAGE_SOURCE" ]; then
             echo "--- Symlinking packages from $(basename "$PACKAGE_SOURCE") ---"
