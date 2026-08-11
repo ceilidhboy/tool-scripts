@@ -33,20 +33,25 @@ setup-worktree /path/to/worktree          # run from a specific path
 
 ### What it does
 
-1. **Traverses up** from the worktree root looking for the project parent
-   root (defined by the presence of `.env`). If `.env` exists in the
-   worktree itself, it is skipped during traversal.
-2. **Symlinks `.env`** from the parent root into the worktree. Aborts if
-   `.env` already exists in the worktree (safety guard).
-3. **Copies `.mcp.json`** from the parent root if the worktree doesn't
-   already have one. Skips if the worktree has its own (e.g., a branch
-   with custom MCP config).
-4. **Runs `composer install`** if `composer.json` exists.
-5. **Runs `php artisan storage:link`** if `artisan` exists.
-6. **Installs frontend dependencies** — auto-detects lockfile
-   (`bun.lock` → bun, `package-lock.json` → npm, `yarn.lock` → yarn,
-   `pnpm-lock.yaml` → pnpm). Override with `--bun`, `--npm`, or
-   `--no-frontend`.
+1. **Shares `.env`** across worktrees — symlinks from bundle root.
+2. **Symlinks `.mcp.json`** from bundle root or master copy.
+3. **Shares `.serena`** across worktrees (opt-in) — pass `--serena` or create
+   a `.serena` at the bundle root yourself to share one project.yml + memories
+   across all of the repo's worktrees; each worktree symlinks to the bundle
+   copy. Seeds `project.yml` with `php`/`typescript`/`bash` and adds
+   `/.serena/` to `.gitignore` (idempotent). Without `--serena` and without a
+   bundle copy, worktrees keep the repo's tracked `.serena` and no symlink or
+   `.gitignore` change is made — team members who don't opt in are unaffected.
+4. **Manages packages** — symlinks vendor/ and node_modules/ from an
+   existing master/develop worktree, or performs a full install if no
+   source is available.
+5. **Bootstraps worktree autoload** — if the
+   `ceilidhboy/laravel-worktree-autoload` package is installed, runs
+   `php artisan worktree:init` to create `project_autoload.php`, which
+   corrects autoloader paths when vendor is symlinked. Warns if the
+   package is missing.
+6. **Runs `php artisan storage:link`** if artisan exists.
+7. **Generates application key** — prompts or auto-generates as needed.
 
 ### Assumptions
 
@@ -55,7 +60,22 @@ setup-worktree /path/to/worktree          # run from a specific path
 - Parent `.env` has a valid `APP_KEY` — no new key is generated (shared
   database).
 
-## Install
+## Package
+
+This toolset includes the `ceilidhboy/laravel-worktree-autoload` Composer
+package at `laravel-worktree-autoload/`. Install it into any Laravel
+project to enable worktree-aware autoloading:
+
+```bash
+composer require --dev ceilidhboy/laravel-worktree-autoload
+php artisan worktree:init
+```
+
+This patches the project's entry points (`public/index.php`, `artisan`,
+`phpunit.xml`, `.gitignore`) and creates `project_autoload.php`. All
+operations are idempotent.
+
+## Install the scripts
 
 ```bash
 cd ~/programming/tools/tool-scripts

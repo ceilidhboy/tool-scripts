@@ -6,6 +6,9 @@
 
 set -euo pipefail
 
+# ---- Helpers ----
+warn() { printf "  \e[33m⚠\e[0m %s\n" "$1" >&2; }
+
 # ---- Init helper ----
 # Used by --init to bootstrap a bare repo + .git pointer at the bundle root.
 # Usage: do_init [<path>] [<url>]
@@ -61,6 +64,21 @@ do_init() {
     echo "  gaw develop"
     echo "  gaw feat/my-feature"
     echo ""
+
+    echo "─────────────────── Recommended ───────────────────"
+    echo ""
+    echo "Before creating child worktrees, install the"
+    echo "worktree-autoload package into your master worktree:"
+    echo ""
+    echo "  cd $init_path/master"
+    echo "  composer require --dev ceilidhboy/laravel-worktree-autoload"
+    echo "  php artisan worktree:init"
+    echo "  git add -A && git commit -m 'Add worktree autoload support'"
+    echo "  git push"
+    echo ""
+    echo "This allows child worktrees to use symlinked vendor"
+    echo "directories with correct autoloading."
+    echo ""
     exit 0
 }
 
@@ -78,7 +96,8 @@ Options:
   --full-install            Install packages directly instead of symlinking
   --no-packages             Skip all package handling (no symlink, no install)
   --key                     Auto-generate application key (passes through to setup-worktree)
-  --no-key                  Skip application key generation (passes through to setup-worktree)
+  --no-key                  Skip key generation (passes through to setup-worktree)
+  --serena                  Share .serena at bundle root across worktrees (passes through to setup-worktree)
   --help, -h                Show this help message
 
 Examples:
@@ -128,7 +147,7 @@ for arg in "$@"; do
         continue
     fi
     case "$arg" in
-        --full-install|--no-packages|--key|--no-key)
+        --full-install|--no-packages|--key|--no-key|--serena)
             setup_flags+=("$arg")
             ;;
         --help|-h)
@@ -163,12 +182,38 @@ fi
 path="${path/#\~/$HOME}"
 
 # ---- Create the worktree ----
+# Always fetch first so remote tracking branches and local branches are current
+git fetch origin 2>/dev/null || true
+
 # If only one positional arg (just a path), create the branch with the full path name,
 # not just git's default basename (which would strip 'feature/', 'bugfix/', etc.).
 if [ ${#git_args[@]} -eq 1 ]; then
     branch="${git_args[0]}"
     if git rev-parse --verify "$branch" >/dev/null 2>&1; then
-        # Branch already exists — just check it out
+        # Branch already exists — fast-forward from remote if tracking it, then check it out.
+        # Uses update-ref rather than fetch because fetch refuses to update a ref that is
+        # checked out in another worktree, whereas update-ref operates on the bare repo directly.
+        if git rev-parse --verify "origin/$branch" >/dev/null 2>&1; then
+            if git merge-base --is-ancestor "$branch" "origin/$branch" 2>/dev/null; then
+                # Local is behind remote in a straight line — fast-forward it
+                git update-ref "refs/heads/$branch" "refs/remotes/origin/$branch" 2>/dev/null || true
+            elif git merge-base --is-ancestor "origin/$branch" "$branch" 2>/dev/null; then
+                # Local is ahead of remote — nothing to do
+                :
+            else
+                # Diverged — remote has been rebased or force-pushed
+                warn "Branch '$branch' has DIVERGED from origin/$branch."
+                warn "  The remote was likely rebased or force-pushed."
+                warn "  Your local branch has $(git rev-list --count "origin/$branch..$branch" 2>/dev/null || echo '?') commits not on the remote."
+                warn "  The remote has $(git rev-list --count "$branch..origin/$branch" 2>/dev/null || echo '?') commits not in your local."
+                warn ""
+                warn "  To discard your local and use the remote version:"
+                warn "    git reset --hard origin/$branch"
+                warn ""
+                warn "  Creating worktree from YOUR LOCAL version (the stale one)."
+                warn "  Run the reset command above inside the new worktree if you want the remote version."
+            fi
+        fi
         git worktree add "$branch" "$branch"
     elif git rev-parse --verify "origin/$branch" >/dev/null 2>&1; then
         # Remote tracking branch exists — create local branch tracking it
