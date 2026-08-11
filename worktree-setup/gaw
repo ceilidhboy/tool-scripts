@@ -100,6 +100,8 @@ Options:
   --serena                  Share .serena at bundle root across worktrees (passes through to setup-worktree)
   --help, -h                Show this help message
 
+Configuration: set share_serena=true in ~/.config/gaw/config to enable it by default.
+
 Examples:
   gaw --init                      # ensure .git pointer exists in current dir
   gaw --init ~/projects/my-app    # ensure .git pointer at a specific path

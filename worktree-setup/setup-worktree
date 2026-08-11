@@ -54,6 +54,9 @@ Options:
   --serena          Share .serena at bundle root across worktrees (seeds it if missing)
   --dry-run         Print what would be done without executing anything
   --help, -h        Show this message
+
+Configuration (~/.config/gaw/config, key=value):
+  share_serena=true  Share .serena at bundle root by default (no --serena flag needed)
 EOF
     exit 0
 }
@@ -66,6 +69,19 @@ Run 'setup-worktree --help' for full usage.
 EOF
     exit 1
 }
+
+# ---- Per-user config (~/.config/gaw/config) ----
+# Optional key=value file read before argument parsing, so CLI flags win.
+# Supported keys:
+#   share_serena=true   share the bundle-root .serena across worktrees by default
+GAW_CONFIG="${GAW_CONFIG:-$HOME/.config/gaw/config}"
+if [ -f "$GAW_CONFIG" ]; then
+    while IFS= read -r line; do
+        case "$line" in
+            share_serena=*) SERENA_SHARE="${line#share_serena=}" ;;
+        esac
+    done < "$GAW_CONFIG"
+fi
 
 # ---- Argument parsing ----
 while [ $# -gt 0 ]; do

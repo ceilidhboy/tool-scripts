@@ -35,13 +35,14 @@ setup-worktree /path/to/worktree          # run from a specific path
 
 1. **Shares `.env`** across worktrees — symlinks from bundle root.
 2. **Symlinks `.mcp.json`** from bundle root or master copy.
-3. **Shares `.serena`** across worktrees (opt-in) — pass `--serena` or create
-   a `.serena` at the bundle root yourself to share one project.yml + memories
-   across all of the repo's worktrees; each worktree symlinks to the bundle
-   copy. Seeds `project.yml` with `php`/`typescript`/`bash` and adds
-   `/.serena/` to `.gitignore` (idempotent). Without `--serena` and without a
-   bundle copy, worktrees keep the repo's tracked `.serena` and no symlink or
-   `.gitignore` change is made — team members who don't opt in are unaffected.
+3. **Shares `.serena`** across worktrees (opt-in) — pass `--serena`, set
+   `share_serena=true` in `~/.config/gaw/config`, or create a `.serena` at the
+   bundle root yourself to share one project.yml + memories across all of the
+   repo's worktrees; each worktree symlinks to the bundle copy. Seeds
+   `project.yml` with `php`/`typescript`/`bash` and adds `/.serena/` to
+   `.gitignore` (idempotent). Without any of those, worktrees keep the repo's
+   tracked `.serena` and no symlink or `.gitignore` change is made — team
+   members who don't opt in are unaffected.
 4. **Manages packages** — symlinks vendor/ and node_modules/ from an
    existing master/develop worktree, or performs a full install if no
    source is available.
@@ -52,6 +53,19 @@ setup-worktree /path/to/worktree          # run from a specific path
    package is missing.
 6. **Runs `php artisan storage:link`** if artisan exists.
 7. **Generates application key** — prompts or auto-generates as needed.
+
+### Per-user configuration
+
+`setup-worktree` reads an optional per-user config file at
+`~/.config/gaw/config` (key=value, one per line, `#` comments allowed). It is
+read before CLI flags, so flags win. Supported keys:
+
+```
+share_serena=true   # share the bundle-root .serena across worktrees by default
+```
+
+The file is optional and machine-local — team members who don't have it get
+the default behaviour (no symlink).
 
 ### Assumptions
 
