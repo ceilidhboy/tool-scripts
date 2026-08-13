@@ -46,6 +46,7 @@ do_init() {
         echo "  git clone --bare git@github.com:Socially-Free/<repo>.git .bare"
         echo ""
         echo "Then run gaw --init again."
+        echo "  (gaw --init sets remote.origin.fetch automatically — bare clones omit it)"
         exit 1
     fi
 
@@ -57,6 +58,16 @@ do_init() {
     else
         echo 'gitdir: .bare' > .git
         echo "  ✓ Created .git pointer → .bare"
+    fi
+
+    # ---- 3. Ensure fetch refspec ----
+    # git clone --bare omits remote.origin.fetch, silently breaking all
+    # origin/* comparisons. Repair it if missing.
+    if ! git config --get remote.origin.fetch >/dev/null 2>&1; then
+        git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+        echo "  ✓ Set remote.origin.fetch (bare clone omits it)"
+    else
+        echo "  ✓ remote.origin.fetch already set"
     fi
 
     echo ""
@@ -184,6 +195,12 @@ fi
 path="${path/#\~/$HOME}"
 
 # ---- Create the worktree ----
+# Ensure the fetch refspec exists (bare clones omit it), else origin/* refs
+# silently go stale and every comparison against the remote lies.
+if ! git config --get remote.origin.fetch >/dev/null 2>&1; then
+    git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+    warn "remote.origin.fetch was missing — set it (bare clone omission)"
+fi
 # Always fetch first so remote tracking branches and local branches are current
 git fetch origin 2>/dev/null || true
 
