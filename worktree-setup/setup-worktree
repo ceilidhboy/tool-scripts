@@ -426,7 +426,7 @@ if [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- Worktree autoload bootstrap ---"
 
-    if php artisan list worktree:init >/dev/null 2>&1; then
+    if php artisan list 2>/dev/null | grep -q 'worktree:init'; then
         run php artisan worktree:init
         info "worktree:init completed"
     else
