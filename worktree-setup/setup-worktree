@@ -169,7 +169,13 @@ fi
 # Source can come from bundle root or worktree.
 
 if [ -f "$BUNDLE_ROOT/.env" ] && [ ! -e "$WORKTREE_ROOT/.env" ]; then
-    # Bundle has .env, worktree doesn't — symlink it
+    # Bundle has .env, worktree doesn't — symlink it.
+    # A broken .env symlink (stale target from an older bundle layout)
+    # counts as "doesn't exist": replace it instead of aborting.
+    if [ -L "$WORKTREE_ROOT/.env" ]; then
+        warn ".env is a broken symlink — replacing"
+        run rm "$WORKTREE_ROOT/.env"
+    fi
     run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.env")" "$WORKTREE_ROOT/.env"
     info "Symlinked .env"
 
@@ -187,6 +193,10 @@ elif [ ! -f "$BUNDLE_ROOT/.env" ] && [ ! -f "$WORKTREE_ROOT/.env" ]; then
 
     if [ -n "$env_src" ]; then
         run cp "$env_src" "$BUNDLE_ROOT/.env"
+        if [ -L "$WORKTREE_ROOT/.env" ]; then
+            warn ".env is a broken symlink — replacing"
+            run rm "$WORKTREE_ROOT/.env"
+        fi
         run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.env")" "$WORKTREE_ROOT/.env"
         info "Created .env from $(basename "$env_src"), symlinked"
         echo "    Review and edit $BUNDLE_ROOT/.env with your secrets"
