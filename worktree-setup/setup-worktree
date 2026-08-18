@@ -34,17 +34,15 @@ Sets up a Laravel worktree after checking it out.  If <path> is given,
 cds there first.  Otherwise uses the current directory.
 
 Package management (smart default):
-  By default, setup-worktree looks for an existing develop or master
-  worktree to symlink vendor/ and node_modules/ from, avoiding costly
-  reinstalls.  If neither is found, a full install is performed.
-
-Worktree autoload:
-  If the laravel-worktree-autoload package is installed, runs
-  php artisan worktree:init to ensure project_autoload.php exists,
-  which corrects autoloader paths when vendor is symlinked.
+  By default, setup-worktree finds an existing develop or master worktree
+  and hardlink-copies its vendor/ and node_modules/ into this worktree
+  (copy-on-write: package code is shared with the source at zero disk cost,
+  while composer's generated autoload data and any divergent packages are
+  private to this worktree).  If no source is found, a full install is
+  performed.
 
 Options:
-  --full-install    Install packages directly (don't symlink from peer)
+  --full-install    Install packages directly (no hardlink sharing from peer)
   --no-packages     Skip all package handling entirely
   --key             Auto-generate application key (no prompt)
   --no-key          Skip application key generation entirely
@@ -300,6 +298,17 @@ echo ""
 
 # Define the full install routine (used by --full-install and auto fallback)
 do_full_install() {
+    # Remove legacy package symlinks first so installs never write through
+    # them into another worktree's vendor/node_modules
+    if [ -L "$WORKTREE_ROOT/vendor" ]; then
+        warn "Removing legacy vendor symlink before full install"
+        run rm "$WORKTREE_ROOT/vendor"
+    fi
+    if [ -L "$WORKTREE_ROOT/node_modules" ]; then
+        warn "Removing legacy node_modules symlink before full install"
+        run rm "$WORKTREE_ROOT/node_modules"
+    fi
+
     # composer install
     if [ -f "$WORKTREE_ROOT/composer.json" ]; then
         echo ""
@@ -363,54 +372,97 @@ case "$PACKAGE_MODE" in
         ;;
 
     auto)
-        # Smart default: look for a peer worktree to symlink from
+        # Smart default: look for a peer worktree to hardlink-copy from
         # Checks master first (preferred), then develop.
         # Prefers a candidate whose vendor/ is a real directory (not a symlink
         # pointing at another branch), so every worktree links directly to the
         # source of truth rather than chaining through an intermediate branch.
         PACKAGE_SOURCE=""
-        PACKAGE_SOURCE_FALLBACK=""
         for candidate in "master" "develop"; do
             candidate_dir="$BUNDLE_ROOT/$candidate"
-            if [ -f "$candidate_dir/vendor/autoload.php" ]; then
-                if [ ! -L "$candidate_dir/vendor" ]; then
-                    PACKAGE_SOURCE="$candidate_dir"
-                    echo "Found package source: $PACKAGE_SOURCE (real packages)"
-                    break
-                else
-                    # vendor is a symlink — save as fallback in case no branch
-                    # has real packages
-                    [ -z "$PACKAGE_SOURCE_FALLBACK" ] && PACKAGE_SOURCE_FALLBACK="$candidate_dir"
-                fi
+            # Hardlink sharing requires a real (non-symlinked) source vendor
+            if [ -f "$candidate_dir/vendor/autoload.php" ] && [ ! -L "$candidate_dir/vendor" ]; then
+                PACKAGE_SOURCE="$candidate_dir"
+                echo "Found package source: $PACKAGE_SOURCE (real packages)"
+                break
             fi
         done
 
-        if [ -z "$PACKAGE_SOURCE" ] && [ -n "$PACKAGE_SOURCE_FALLBACK" ]; then
-            PACKAGE_SOURCE="$PACKAGE_SOURCE_FALLBACK"
-            echo "Found package source: $PACKAGE_SOURCE (via symlink)"
-        fi
-
         if [ -n "$PACKAGE_SOURCE" ]; then
-            echo "--- Symlinking packages from $(basename "$PACKAGE_SOURCE") ---"
+            echo "--- Sharing packages from $(basename "$PACKAGE_SOURCE") (hardlink copy-on-write) ---"
 
-            # Symlink vendor
+            # vendor: hardlink-copy from the source. Package code is shared at
+            # zero disk cost; composer's generated data files (autoload maps,
+            # installed.json, bin proxies) and any divergent packages become
+            # private to this worktree the moment they are regenerated.
             if [ -e "$WORKTREE_ROOT/vendor" ]; then
-                warn "vendor already exists — skipping symlink"
-            else
-                run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$PACKAGE_SOURCE/vendor")" "$WORKTREE_ROOT/vendor"
-                info "Symlinked vendor → $PACKAGE_SOURCE/vendor"
+                if [ -L "$WORKTREE_ROOT/vendor" ]; then
+                    warn "vendor is a legacy symlink — replacing with hardlink copy"
+                    run rm "$WORKTREE_ROOT/vendor"
+                else
+                    warn "vendor already exists — skipping hardlink copy"
+                fi
+            fi
+            if [ ! -e "$WORKTREE_ROOT/vendor" ]; then
+                if [ "$(stat -c %d "$PACKAGE_SOURCE/vendor" 2>/dev/null)" = "$(stat -c %d "$WORKTREE_ROOT" 2>/dev/null)" ]; then
+                    run cp -al "$PACKAGE_SOURCE/vendor" "$WORKTREE_ROOT/vendor"
+                    info "Hardlinked vendor from $PACKAGE_SOURCE/vendor (copy-on-write)"
+                else
+                    warn "Package source is on a different filesystem — cannot hardlink, falling back to symlink"
+                    run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$PACKAGE_SOURCE/vendor")" "$WORKTREE_ROOT/vendor"
+                fi
             fi
 
-            # Symlink node_modules (if it exists in the source)
+            # node_modules: same treatment (if present in the source)
             if [ -d "$PACKAGE_SOURCE/node_modules" ]; then
                 if [ -e "$WORKTREE_ROOT/node_modules" ]; then
-                    warn "node_modules already exists — skipping symlink"
-                else
-                    run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$PACKAGE_SOURCE/node_modules")" "$WORKTREE_ROOT/node_modules"
-                    info "Symlinked node_modules → $PACKAGE_SOURCE/node_modules"
+                    if [ -L "$WORKTREE_ROOT/node_modules" ]; then
+                        warn "node_modules is a legacy symlink — replacing with hardlink copy"
+                        run rm "$WORKTREE_ROOT/node_modules"
+                    else
+                        warn "node_modules already exists — skipping hardlink copy"
+                    fi
+                fi
+                if [ ! -e "$WORKTREE_ROOT/node_modules" ]; then
+                    if [ "$(stat -c %d "$PACKAGE_SOURCE/node_modules" 2>/dev/null)" = "$(stat -c %d "$WORKTREE_ROOT" 2>/dev/null)" ]; then
+                        run cp -al "$PACKAGE_SOURCE/node_modules" "$WORKTREE_ROOT/node_modules"
+                        info "Hardlinked node_modules from $PACKAGE_SOURCE/node_modules (copy-on-write)"
+                    else
+                        warn "Package source is on a different filesystem — cannot hardlink, falling back to symlink"
+                        run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$PACKAGE_SOURCE/node_modules")" "$WORKTREE_ROOT/node_modules"
+                    fi
                 fi
             else
-                warn "node_modules not found in source — skipping symlink"
+                warn "node_modules not found in source — skipping"
+            fi
+
+            # Reconcile: regenerate this worktree's own catalogue from ITS
+            # composer.json. No-op when the lock matches the source; installs
+            # only divergent packages when it doesn't. Writes never reach the
+            # source worktree — this worktree's vendor is its own.
+            echo ""
+            echo "--- Reconcile packages for this worktree ---"
+            if [ -f "$WORKTREE_ROOT/composer.json" ]; then
+                run composer install --no-interaction
+                info "composer catalogue reconciled for this worktree"
+            fi
+
+            # Frontend: skip when the lockfile matches the source; otherwise
+            # reconcile against this worktree's own lockfile.
+            if [ -f "$WORKTREE_ROOT/bun.lock" ]; then
+                if [ -f "$PACKAGE_SOURCE/bun.lock" ] && cmp -s "$WORKTREE_ROOT/bun.lock" "$PACKAGE_SOURCE/bun.lock"; then
+                    info "bun.lock matches package source — node_modules already consistent"
+                elif [ "$FRONTEND" != "none" ]; then
+                    run bun install --frozen-lockfile
+                    info "bun install reconciled node_modules for this worktree"
+                fi
+            elif [ -f "$WORKTREE_ROOT/package-lock.json" ]; then
+                if [ -f "$PACKAGE_SOURCE/package-lock.json" ] && cmp -s "$WORKTREE_ROOT/package-lock.json" "$PACKAGE_SOURCE/package-lock.json"; then
+                    info "package-lock.json matches package source — node_modules already consistent"
+                elif [ "$FRONTEND" != "none" ]; then
+                    run npm ci
+                    info "npm ci reconciled node_modules for this worktree"
+                fi
             fi
         else
             echo "--- No package source found — performing full install ---"
@@ -419,30 +471,7 @@ case "$PACKAGE_MODE" in
         ;;
 esac
 
-# ---- 5. Worktree autoload bootstrap ----
-# If the laravel-worktree-autoload package is installed, run its
-# init command to ensure project_autoload.php exists (idempotent).
-if [ -f "$WORKTREE_ROOT/artisan" ]; then
-    echo ""
-    echo "--- Worktree autoload bootstrap ---"
-
-    if php artisan list 2>/dev/null | grep -q 'worktree:init'; then
-        run php artisan worktree:init
-        info "worktree:init completed"
-    else
-        warn "Package 'ceilidhboy/laravel-worktree-autoload' is not installed."
-        warn "Without it, each worktree will need the autoload wrapper at"
-        warn "project_autoload.php to handle symlinked vendor paths correctly."
-        warn ""
-        warn "  cd \$(dirname \$(find-up \$(dirname \$(find-up .bare)))/master)"
-        warn "  composer require --dev ceilidhboy/laravel-worktree-autoload"
-        warn "  php artisan worktree:init"
-        warn "  git add -A && git commit -m 'Add worktree autoload support'"
-        warn "  git push"
-    fi
-fi
-
-# ---- 6. php artisan storage:link ----
+# ---- 5. php artisan storage:link ----
 if [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- php artisan storage:link ---"
@@ -452,7 +481,7 @@ else
     warn "No artisan found, skipping storage:link"
 fi
 
-# ---- 7. php artisan key:generate ----
+# ---- 6. php artisan key:generate ----
 if [ "$KEY_MODE" != "skip" ] && [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- Application key ---"

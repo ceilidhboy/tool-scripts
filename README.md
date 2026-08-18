@@ -8,7 +8,7 @@ uninstall.
 
 | Toolset | Description                                               |
 |---|-----------------------------------------------------------|
-| [worktree-setup](worktree-setup/README.md) | Git worktree wrappers with Laravel worktree bootstrapping |
+| [worktree-setup](worktree-setup/README.md) | Git worktree wrappers with copy-on-write package sharing for Laravel |
 
 ## Install
 
