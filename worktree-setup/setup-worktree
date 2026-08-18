@@ -436,6 +436,29 @@ case "$PACKAGE_MODE" in
                 warn "node_modules not found in source — skipping"
             fi
 
+            # Data-file isolation: composer (and bun/npm) rewrite their data
+            # files IN PLACE (same inode), so hardlinked copies would silently
+            # mutate the source worktree's files whenever this worktree's
+            # catalogue diverges. Break the links, preserving content — from
+            # here on the data files are private to this worktree while
+            # package code stays shared (composer never edits package code in
+            # place; it replaces whole directories, which is hardlink-safe).
+            echo ""
+            echo "--- Isolating composer/bun data files for this worktree ---"
+            unshare_data_files() {
+                while IFS= read -r -d '' f; do
+                    run cp "$f" "$f.worktree-copy"
+                    run mv "$f.worktree-copy" "$f"
+                done < <(find "$1" -type f -links +1 -print0 2>/dev/null)
+            }
+            unshare_data_files "$WORKTREE_ROOT/vendor/composer"
+            unshare_data_files "$WORKTREE_ROOT/vendor/bin"
+            unshare_data_files "$WORKTREE_ROOT/vendor/autoload.php"
+            for d in .bin .cache .vite-temp .package-lock.json .bun-tag; do
+                [ -e "$WORKTREE_ROOT/node_modules/$d" ] && unshare_data_files "$WORKTREE_ROOT/node_modules/$d"
+            done
+            info "data files are now private to this worktree (package code stays shared)"
+
             # Reconcile: regenerate this worktree's own catalogue from ITS
             # composer.json. No-op when the lock matches the source; installs
             # only divergent packages when it doesn't. Writes never reach the
@@ -475,8 +498,12 @@ esac
 if [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- php artisan storage:link ---"
-    run php artisan storage:link
-    info "storage:link completed"
+    if [ -e "$WORKTREE_ROOT/public/storage" ]; then
+        info "storage link already exists — skipping"
+    else
+        run php artisan storage:link
+        info "storage:link completed"
+    fi
 else
     warn "No artisan found, skipping storage:link"
 fi
