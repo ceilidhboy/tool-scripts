@@ -78,17 +78,14 @@ do_init() {
 
     echo "─────────────────── Recommended ───────────────────"
     echo ""
-    echo "Before creating child worktrees, install the"
-    echo "worktree-autoload package into your master worktree:"
+    echo "Create a master worktree first, then child worktrees:"
     echo ""
-    echo "  cd $init_path/master"
-    echo "  composer require --dev ceilidhboy/laravel-worktree-autoload"
-    echo "  php artisan worktree:init"
-    echo "  git add -A && git commit -m 'Add worktree autoload support'"
-    echo "  git push"
+    echo "  gaw master"
+    echo "  gaw feat/my-feature"
     echo ""
-    echo "This allows child worktrees to use symlinked vendor"
-    echo "directories with correct autoloading."
+    echo "setup-worktree hardlink-copies vendor/ and node_modules/ from"
+    echo "master into each new worktree (copy-on-write: shared package code,"
+    echo "per-worktree composer data), so child worktrees are cheap to create."
     echo ""
     exit 0
 }
@@ -104,8 +101,8 @@ Options:
   --init [<path>]           Ensure .git pointer exists at <path> (defaults to
                               current directory). Checks .bare/ exists first and
                               instructs you to clone it if not.
-  --full-install            Install packages directly instead of symlinking
-  --no-packages             Skip all package handling (no symlink, no install)
+  --full-install            Install packages directly instead of hardlink sharing
+  --no-packages             Skip all package handling entirely
   --key                     Auto-generate application key (passes through to setup-worktree)
   --no-key                  Skip key generation (passes through to setup-worktree)
   --serena                  Share .serena at bundle root across worktrees (passes through to setup-worktree)

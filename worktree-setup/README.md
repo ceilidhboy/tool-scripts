@@ -74,21 +74,6 @@ the default behaviour (no symlink).
 - Parent `.env` has a valid `APP_KEY` — no new key is generated (shared
   database).
 
-## Package
-
-This toolset includes the `ceilidhboy/laravel-worktree-autoload` Composer
-package at `laravel-worktree-autoload/`. Install it into any Laravel
-project to enable worktree-aware autoloading:
-
-```bash
-composer require --dev ceilidhboy/laravel-worktree-autoload
-php artisan worktree:init
-```
-
-This patches the project's entry points (`public/index.php`, `artisan`,
-`phpunit.xml`, `.gitignore`) and creates `project_autoload.php`. All
-operations are idempotent.
-
 ## Install the scripts
 
 ```bash
