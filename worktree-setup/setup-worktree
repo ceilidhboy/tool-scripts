@@ -257,7 +257,10 @@ EOF
 }
 
 append_gitignore_serena() {
-    echo "/.serena/" >> "$1"
+    # No trailing slash: in shared worktrees .serena is a symlink to the
+    # bundle copy, and git only matches trailing-slash patterns against
+    # real directories — the symlink would show up as untracked.
+    echo "/.serena" >> "$1"
 }
 
 if [ "${SERENA_SHARE:-false}" = "true" ] || [ -d "$BUNDLE_SERENA" ]; then
@@ -295,9 +298,9 @@ if [ "${SERENA_SHARE:-false}" = "true" ] || [ -d "$BUNDLE_SERENA" ]; then
     fi
 
     # Keep .serena out of git status in symlinked worktrees (idempotent)
-    if [ -f "$WORKTREE_ROOT/.gitignore" ] && ! grep -q '^/.serena/$' "$WORKTREE_ROOT/.gitignore"; then
+    if [ -f "$WORKTREE_ROOT/.gitignore" ] && ! grep -q '^/.serena$' "$WORKTREE_ROOT/.gitignore"; then
         run append_gitignore_serena "$WORKTREE_ROOT/.gitignore"
-        info "Added /.serena/ to .gitignore"
+        info "Added /.serena to .gitignore"
     fi
 else
     info "No shared .serena at bundle root — keeping the worktree's tracked .serena (no symlink)"

@@ -39,7 +39,7 @@ setup-worktree /path/to/worktree          # run from a specific path
    `share_serena=true` in `~/.config/gaw/config`, or create a `.serena` at the
    bundle root yourself to share one project.yml + memories across all of the
    repo's worktrees; each worktree symlinks to the bundle copy. Seeds
-   `project.yml` with `php`/`typescript`/`bash` and adds `/.serena/` to
+   `project.yml` with `php`/`typescript`/`bash` and adds `/.serena` to
    `.gitignore` (idempotent). Without any of those, worktrees keep the repo's
    tracked `.serena` and no symlink or `.gitignore` change is made — team
    members who don't opt in are unaffected.
