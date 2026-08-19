@@ -496,8 +496,11 @@ case "$PACKAGE_MODE" in
                 if [ -f "$PACKAGE_SOURCE/package-lock.json" ] && cmp -s "$WORKTREE_ROOT/package-lock.json" "$PACKAGE_SOURCE/package-lock.json"; then
                     info "package-lock.json matches package source — node_modules already consistent"
                 elif [ "$FRONTEND" != "none" ]; then
-                    run npm ci
-                    info "npm ci reconciled node_modules for this worktree"
+                    # Incremental reconcile: npm install keeps hardlinked files
+                    # for matching packages and only replaces diverged ones.
+                    # npm ci would wipe node_modules and destroy the sharing.
+                    run npm install --no-save --no-audit --no-fund --no-package-lock
+                    info "npm install reconciled node_modules for this worktree"
                 fi
             fi
         else
