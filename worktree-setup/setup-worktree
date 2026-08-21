@@ -13,6 +13,7 @@ FRONTEND="auto"   # auto | bun | npm | none
 DRY_RUN=false
 PACKAGE_MODE="auto"   # auto | full-install | no-packages
 KEY_MODE="prompt"     # prompt | generate | skip
+SERENA_SHARE="true"   # true | false — share .serena at bundle root by default
 
 # ---- Helpers ----
 info()  { printf "  \e[32m✓\e[0m %s\n" "$1"; }
@@ -49,12 +50,12 @@ Options:
   --bun             Force bun install (even without bun.lock)
   --npm             Force npm install (even without package-lock.json)
   --no-frontend     Skip frontend dependency install
-  --serena          Share .serena at bundle root across worktrees (seeds it if missing)
+  --no-serena       Skip sharing .serena at bundle root (default: share)
   --dry-run         Print what would be done without executing anything
   --help, -h        Show this message
 
 Configuration (~/.config/gaw/config, key=value):
-  share_serena=true  Share .serena at bundle root by default (no --serena flag needed)
+  share_serena=false  Disable sharing .serena at bundle root by default
 EOF
     exit 0
 }
@@ -71,7 +72,7 @@ EOF
 # ---- Per-user config (~/.config/gaw/config) ----
 # Optional key=value file read before argument parsing, so CLI flags win.
 # Supported keys:
-#   share_serena=true   share the bundle-root .serena across worktrees by default
+#   share_serena=false   disable sharing the bundle-root .serena across worktrees
 GAW_CONFIG="${GAW_CONFIG:-$HOME/.config/gaw/config}"
 if [ -f "$GAW_CONFIG" ]; then
     while IFS= read -r line; do
@@ -91,7 +92,7 @@ while [ $# -gt 0 ]; do
         --bun)           FRONTEND="bun";              shift ;;
         --npm)           FRONTEND="npm";              shift ;;
         --no-frontend)   FRONTEND="none";             shift ;;
-        --serena)        SERENA_SHARE="true";          shift ;;
+        --no-serena)     SERENA_SHARE="false";         shift ;;
         --dry-run)       DRY_RUN=true;                shift ;;
         --help|-h)       show_help ;;
         --)              shift; break ;;

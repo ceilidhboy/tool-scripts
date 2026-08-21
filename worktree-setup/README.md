@@ -35,14 +35,11 @@ setup-worktree /path/to/worktree          # run from a specific path
 
 1. **Shares `.env`** across worktrees — symlinks from bundle root.
 2. **Symlinks `.mcp.json`** from bundle root or master copy.
-3. **Shares `.serena`** across worktrees (opt-in) — pass `--serena`, set
-   `share_serena=true` in `~/.config/gaw/config`, or create a `.serena` at the
-   bundle root yourself to share one project.yml + memories across all of the
-   repo's worktrees; each worktree symlinks to the bundle copy. Seeds
-   `project.yml` with `php`/`typescript`/`bash` and adds `/.serena` to
-   `.gitignore` (idempotent). Without any of those, worktrees keep the repo's
-   tracked `.serena` and no symlink or `.gitignore` change is made — team
-   members who don't opt in are unaffected.
+3. **Shares `.serena`** across worktrees (opt-out) — by default, creates a
+   shared `.serena` at the bundle root and symlinks it into each worktree,
+   seeding `project.yml` with `php`/`typescript`/`bash` and adding `/.serena`
+   to `.gitignore`. Pass `--no-serena` or set `share_serena=false` in
+   `~/.config/gaw/config` to disable.
 4. **Manages packages** — symlinks vendor/ and node_modules/ from an
    existing master/develop worktree, or performs a full install if no
    source is available.
@@ -61,7 +58,7 @@ setup-worktree /path/to/worktree          # run from a specific path
 read before CLI flags, so flags win. Supported keys:
 
 ```
-share_serena=true   # share the bundle-root .serena across worktrees by default
+share_serena=false  # disable sharing .serena at bundle root (default: share)
 ```
 
 The file is optional and machine-local — team members who don't have it get
