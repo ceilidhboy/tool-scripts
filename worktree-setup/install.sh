@@ -12,7 +12,7 @@ BIN_DIR="$HOME/.local/bin"
 
 mkdir -p "$BIN_DIR"
 
-for script in "$TOOLSET_DIR"/gaw "$TOOLSET_DIR"/setup-worktree; do
+for script in "$TOOLSET_DIR"/gaw "$TOOLSET_DIR"/setup-worktree "$TOOLSET_DIR"/update-tia-baseline; do
     name="$(basename "$script")"
     target="$BIN_DIR/$name"
 

@@ -1,0 +1,121 @@
+#!/bin/bash
+#
+# update-tia-baseline — Regenerate and commit the Pest TIA dependency graph on master.
+#
+# This script:
+#   1. Checks that you're on the master branch
+#   2. Runs `pest --tia --fresh` to regenerate the baseline
+#   3. Stages and commits the updated graph
+#   4. Optionally pushes to origin/master
+#
+# Usage: update-tia-baseline [--push]
+#
+# The TIA graph lives in tests/.pest-tia-cache/ and is committed to Git so that
+# worktrees and fresh clones get fast first runs. On non-master worktrees,
+# setup-worktree applies --skip-worktree to hide TIA changes from git status.
+# On master, changes are visible so you can commit them easily with this script.
+
+set -euo pipefail
+
+# ---- Config ----
+TIA_CACHE_DIR="tests/.pest-tia-cache"
+TIA_FILES=("graph.json" "js-module-graph.cache.json")
+
+# ---- Helpers ----
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+error()   { echo -e "${RED}Error: $1${NC}" >&2; exit 1; }
+success() { echo -e "${GREEN}$1${NC}"; }
+warning() { echo -e "${YELLOW}$1${NC}"; }
+
+# ---- Parse args ----
+PUSH=false
+for arg in "$@"; do
+    case "$arg" in
+        --push) PUSH=true ;;
+        --help|-h)
+            echo "Usage: update-tia-baseline [--push]"
+            echo ""
+            echo "Regenerates the Pest TIA dependency graph on master and commits it."
+            echo "Must be run from a worktree on the master branch."
+            echo ""
+            echo "Options:"
+            echo "  --push   Push to origin/master after committing"
+            echo "  --help   Show this help message"
+            exit 0
+            ;;
+        *) error "Unknown argument: $arg (try --help)" ;;
+    esac
+done
+
+# ---- Check we're on master ----
+current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [ "$current_branch" != "master" ]; then
+    error "This script must be run on the master branch.\n  Current branch: ${current_branch:-detached HEAD}\n\n  cd to your master worktree first."
+fi
+
+# ---- Check TIA cache directory exists ----
+if [ ! -d "$TIA_CACHE_DIR" ]; then
+    error "TIA cache directory not found: $TIA_CACHE_DIR\n\n  Run 'pest --tia' first to create the initial baseline."
+fi
+
+# ---- Check pest is available ----
+if [ ! -x "./vendor/bin/pest" ]; then
+    error "Pest not found at ./vendor/bin/pest\n\n  Run: composer install"
+fi
+
+# ---- Check skip-worktree is NOT set on master (it shouldn't be) ----
+tia_flag=$(git ls-files -v "$TIA_CACHE_DIR/graph.json" 2>/dev/null | cut -c1)
+if [ "$tia_flag" = "S" ]; then
+    warning "skip-worktree is set on $TIA_CACHE_DIR/graph.json — removing it"
+    for f in "${TIA_FILES[@]}"; do
+        git update-index --no-skip-worktree "$TIA_CACHE_DIR/$f" 2>/dev/null || true
+    done
+    success "skip-worktree flags removed"
+    echo ""
+fi
+
+echo "Updating TIA baseline on master..."
+echo ""
+
+# ---- Regenerate ----
+PEST_CMD="./vendor/bin/pest --parallel --tia --fresh"
+echo "Running $PEST_CMD (this may take a few minutes)..."
+$PEST_CMD
+echo ""
+
+# ---- Stage ----
+echo "Staging TIA cache files..."
+git add "$TIA_CACHE_DIR/"
+success "Files staged"
+echo ""
+
+# ---- Commit ----
+if git diff --cached --quiet; then
+    warning "No changes to commit — baseline is already up to date"
+    exit 0
+fi
+
+echo "Committing updated baseline..."
+git commit -m "Update TIA baseline
+
+Regenerated Test Impact Analysis dependency graph on master.
+This ensures worktrees and fresh clones get fast first runs."
+success "Baseline committed"
+echo ""
+
+# ---- Push (optional) ----
+if [ "$PUSH" = true ]; then
+    echo "Pushing to origin/master..."
+    git push origin master
+    success "Pushed"
+    echo ""
+else
+    echo "Not pushing (use --push to push to origin/master)"
+    echo ""
+fi
+
+success "TIA baseline updated successfully!"

@@ -557,6 +557,25 @@ if [ "$KEY_MODE" != "skip" ] && [ -f "$WORKTREE_ROOT/artisan" ]; then
     fi
 fi
 
+# ---- 7. TIA skip-worktree (non-master worktrees) ----
+# On master, TIA changes should be visible in git status for easy committing.
+# On other worktrees, apply --skip-worktree so TIA graph changes don't
+# pollute git status or block worktree removal.
+current_branch=$(git -C "$WORKTREE_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [ "$current_branch" != "master" ]; then
+    tia_cache="$WORKTREE_ROOT/tests/.pest-tia-cache"
+    if [ -d "$tia_cache" ]; then
+        echo ""
+        echo "--- TIA skip-worktree ---"
+        for f in graph.json js-module-graph.cache.json; do
+            if [ -f "$tia_cache/$f" ]; then
+                git -C "$WORKTREE_ROOT" update-index --skip-worktree "$tia_cache/$f" 2>/dev/null || true
+            fi
+        done
+        info "Applied skip-worktree to TIA cache files"
+    fi
+fi
+
 # ---- Done ----
 echo ""
 echo "============================================"
