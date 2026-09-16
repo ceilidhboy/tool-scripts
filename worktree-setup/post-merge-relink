@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# post-merge-relink — Re-link vendor after merging master into a worktree.
+#
+# Usage: post-merge-relink [<worktree-path>]
+#        If omitted, uses the current directory.
+#
+# After merging master (or any branch that changes composer.lock), vendor's
+# hardlinks point to inodes that master's composer install no longer references.
+# This script removes vendor and runs setup-worktree to re-establish sharing.
+#
+# Rule from §6.1 of the shiftcore handoff:
+#   Whenever a worktree's composer.lock changes — merge, rebase, pull —
+#   re-run `rm -rf vendor && setup-worktree` afterwards.
+#   Merge first, re-link second.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKTREE_ROOT="${1:-.}"
+BUNDLE_ROOT="$(cd "$WORKTREE_ROOT/.." && pwd)"
+
+# Resolve to absolute path
+WORKTREE_ROOT="$(cd "$WORKTREE_ROOT" && pwd)"
+
+# Validate
+if [ ! -f "$WORKTREE_ROOT/composer.json" ]; then
+    echo "Error: No composer.json found in $WORKTREE_ROOT" >&2
+    exit 1
+fi
+
+if [ ! -f "$WORKTREE_ROOT/.git" ]; then
+    echo "Error: $WORKTREE_ROOT is not a git worktree (.git not found)" >&2
+    exit 1
+fi
+
+# Find master's composer.lock
+MASTER_LOCK="$BUNDLE_ROOT/master/composer.lock"
+if [ ! -f "$MASTER_LOCK" ]; then
+    echo "Error: master composer.lock not found at $MASTER_LOCK" >&2
+    exit 1
+fi
+
+WORKTREE_LOCK="$WORKTREE_ROOT/composer.lock"
+MASTER_MD5=$(md5sum "$MASTER_LOCK" | cut -d' ' -f1)
+WORKTREE_MD5=$(md5sum "$WORKTREE_LOCK" | cut -d' ' -f1)
+
+if [ "$MASTER_MD5" = "$WORKTREE_MD5" ]; then
+    echo "Lockfiles match — vendor is already in sync with master. No relink needed."
+    exit 0
+fi
+
+BRANCH=$(git -C "$WORKTREE_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+echo "Lockfiles differ (branch: $BRANCH). Relinking vendor from master..."
+
+# Remove vendor
+rm -rf "$WORKTREE_ROOT/vendor"
+echo "  Removed vendor/"
+
+# Re-link via setup-worktree
+"$SCRIPT_DIR/setup-worktree" --no-key --no-frontend "$WORKTREE_ROOT"
+
+echo ""
+echo "Done. Vendor relinked from master."
+echo "Verify with: composer install --dry-run | grep 'Nothing to install'"
