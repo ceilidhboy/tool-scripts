@@ -29,7 +29,17 @@ setup-worktree --bun                      # force bun install
 setup-worktree --npm                      # force npm install
 setup-worktree --no-frontend              # skip frontend deps
 setup-worktree /path/to/worktree          # run from a specific path
+setup-worktree --no-ceremony /path/to/wt  # packages only (no env/MCP/Serena/artisan)
 ```
+
+### Review / CI worktrees
+
+`--no-ceremony` (alias `--review`) runs the package step and nothing else. It skips the
+`.env` symlink, `.mcp.json`, `.serena`, `storage:link`, `key:generate` and the TIA
+`skip-worktree` bits, so a worktree created for an automated job never inherits a
+developer's environment nor mutates the git index. Packages are still hard-linked from
+the master worktree; the composer reconcile is skipped with a warning when `composer`
+is not on `PATH`.
 
 ### What it does
 
@@ -40,7 +50,7 @@ setup-worktree /path/to/worktree          # run from a specific path
    seeding `project.yml` with `php`/`typescript`/`bash` and adding `/.serena`
    to `.gitignore`. Pass `--no-serena` or set `share_serena=false` in
    `~/.config/gaw/config` to disable.
-4. **Manages packages** — symlinks vendor/ and node_modules/ from an
+4. **Manages packages** — hardlink-copies `vendor/` and `node_modules/` from an
    existing master/develop worktree, or performs a full install if no
    source is available.
 5. **Bootstraps worktree autoload** — if the
