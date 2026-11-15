@@ -106,6 +106,10 @@ Options:
   --key                     Auto-generate application key (passes through to setup-worktree)
   --no-key                  Skip key generation (passes through to setup-worktree)
   --serena                  Share .serena at bundle root across worktrees (passes through to setup-worktree)
+  --no-ceremony, --review   Skip the development ceremony — .env, .mcp.json, .serena,
+                            storage:link, key:generate, TIA skip-worktree — while still
+                            sharing packages (passes through to setup-worktree). For
+                            throwaway or automated worktrees such as a review.
   --help, -h                Show this help message
 
 Configuration: set share_serena=true in ~/.config/gaw/config to enable it by default.
@@ -157,7 +161,7 @@ for arg in "$@"; do
         continue
     fi
     case "$arg" in
-        --full-install|--no-packages|--key|--no-key|--serena)
+        --full-install|--no-packages|--key|--no-key|--serena|--no-ceremony|--review)
             setup_flags+=("$arg")
             ;;
         --help|-h)

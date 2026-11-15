@@ -14,6 +14,7 @@ DRY_RUN=false
 PACKAGE_MODE="auto"   # auto | full-install | no-packages
 KEY_MODE="prompt"     # prompt | generate | skip
 SERENA_SHARE="true"   # true | false — share .serena at bundle root by default
+CEREMONY="full"       # full | none — none skips .env / .mcp.json / .serena / artisan steps
 
 # ---- Helpers ----
 info()  { printf "  \e[32m✓\e[0m %s\n" "$1"; }
@@ -51,6 +52,12 @@ Options:
   --npm             Force npm install (even without package-lock.json)
   --no-frontend     Skip frontend dependency install
   --no-serena       Skip sharing .serena at bundle root (default: share)
+  --no-ceremony     Skip the development ceremony: .env, .mcp.json, .serena,
+                    storage:link, key:generate and TIA skip-worktree. Package
+                    sharing still runs. Intended for throwaway or automated
+                    worktrees (a review, a CI checkout) that must not inherit a
+                    developer's environment.
+  --review          Alias for --no-ceremony
   --dry-run         Print what would be done without executing anything
   --help, -h        Show this message
 
@@ -93,6 +100,7 @@ while [ $# -gt 0 ]; do
         --npm)           FRONTEND="npm";              shift ;;
         --no-frontend)   FRONTEND="none";             shift ;;
         --no-serena)     SERENA_SHARE="false";         shift ;;
+        --no-ceremony|--review) CEREMONY="none";        shift ;;
         --dry-run)       DRY_RUN=true;                shift ;;
         --help|-h)       show_help ;;
         --)              shift; break ;;
@@ -169,7 +177,10 @@ fi
 # Goal: .env lives at bundle root, each worktree symlinks to it.
 # Source can come from bundle root or worktree.
 
-if [ -f "$BUNDLE_ROOT/.env" ] && [ ! -e "$WORKTREE_ROOT/.env" ]; then
+if [ "$CEREMONY" = "none" ]; then
+    info "Skipping .env sharing (--no-ceremony)"
+
+elif [ -f "$BUNDLE_ROOT/.env" ] && [ ! -e "$WORKTREE_ROOT/.env" ]; then
     # Bundle has .env, worktree doesn't — symlink it.
     # A broken .env symlink (stale target from an older bundle layout)
     # counts as "doesn't exist": replace it instead of aborting.
@@ -210,14 +221,17 @@ elif [ ! -f "$BUNDLE_ROOT/.env" ] && [ ! -f "$WORKTREE_ROOT/.env" ]; then
         echo "      cp .env.example .env"
         echo "      php artisan key:generate"
         echo ""
-        exit 0
+        warn "No shared .env to link — continuing (package handling still runs)"
     fi
 fi
 
 # ---- 2. Symlink .mcp.json ----
 MCP_MASTER="$HOME/.local/bin/.mcp.json"
 
-if [ ! -e "$WORKTREE_ROOT/.mcp.json" ]; then
+if [ "$CEREMONY" = "none" ]; then
+    info "Skipping .mcp.json sharing (--no-ceremony)"
+
+elif [ ! -e "$WORKTREE_ROOT/.mcp.json" ]; then
     if [ -f "$BUNDLE_ROOT/.mcp.json" ]; then
         run ln -s "$(realpath --relative-to="$WORKTREE_ROOT" "$BUNDLE_ROOT/.mcp.json")" "$WORKTREE_ROOT/.mcp.json"
         info "Symlinked .mcp.json → $BUNDLE_ROOT/.mcp.json"
@@ -264,7 +278,10 @@ append_gitignore_serena() {
     echo "/.serena" >> "$1"
 }
 
-if [ "${SERENA_SHARE:-false}" = "true" ] || [ -d "$BUNDLE_SERENA" ]; then
+if [ "$CEREMONY" = "none" ]; then
+    info "Skipping .serena sharing (--no-ceremony)"
+
+elif [ "${SERENA_SHARE:-false}" = "true" ] || [ -d "$BUNDLE_SERENA" ]; then
     if [ -L "$WT_SERENA" ]; then
         if [ -e "$WT_SERENA" ]; then
             info ".serena already symlinked"
@@ -326,6 +343,7 @@ do_full_install() {
     # composer install
     if [ -f "$WORKTREE_ROOT/composer.json" ]; then
         echo ""
+        command -v composer >/dev/null 2>&1 || warn "composer not on PATH — skipping composer install"
         echo "--- composer install ---"
         run composer install
         info "composer install completed"
@@ -480,8 +498,12 @@ case "$PACKAGE_MODE" in
             echo ""
             echo "--- Reconcile packages for this worktree ---"
             if [ -f "$WORKTREE_ROOT/composer.json" ]; then
-                run composer install --no-interaction
-                info "composer catalogue reconciled for this worktree"
+                if command -v composer >/dev/null 2>&1; then
+                    run composer install --no-interaction
+                    info "composer catalogue reconciled for this worktree"
+                else
+                    warn "composer not on PATH — skipped catalogue reconcile (packages still shared)"
+                fi
             fi
 
             # Frontend: skip when the lockfile matches the source; otherwise
@@ -512,7 +534,10 @@ case "$PACKAGE_MODE" in
 esac
 
 # ---- 5. php artisan storage:link ----
-if [ -f "$WORKTREE_ROOT/artisan" ]; then
+if [ "$CEREMONY" = "none" ]; then
+    info "Skipping storage:link (--no-ceremony)"
+
+elif [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- php artisan storage:link ---"
     if [ -e "$WORKTREE_ROOT/public/storage" ]; then
@@ -526,7 +551,10 @@ else
 fi
 
 # ---- 6. php artisan key:generate ----
-if [ "$KEY_MODE" != "skip" ] && [ -f "$WORKTREE_ROOT/artisan" ]; then
+if [ "$CEREMONY" = "none" ]; then
+    info "Skipping application key generation (--no-ceremony)"
+
+elif [ "$KEY_MODE" != "skip" ] && [ -f "$WORKTREE_ROOT/artisan" ]; then
     echo ""
     echo "--- Application key ---"
 
@@ -562,7 +590,10 @@ fi
 # On other worktrees, apply --skip-worktree so TIA graph changes don't
 # pollute git status or block worktree removal.
 current_branch=$(git -C "$WORKTREE_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo "")
-if [ "$current_branch" != "master" ]; then
+if [ "$CEREMONY" = "none" ]; then
+    info "Skipping TIA skip-worktree (--no-ceremony)"
+
+elif [ "$current_branch" != "master" ]; then
     tia_cache="$WORKTREE_ROOT/tests/.pest-tia-cache"
     if [ -d "$tia_cache" ]; then
         echo ""
