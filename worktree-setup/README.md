@@ -18,6 +18,60 @@ gaw --detach feat/experiment HEAD~3  # flags pass through to git
 Arguments are forwarded verbatim to `git worktree add`. The path argument
 is extracted to determine where to cd to for the setup step.
 
+### `post-merge-relink`
+
+Re-links a worktree's hardlinked `vendor/` after a merge, pull or rebase
+changes `composer.lock`.
+
+```
+post-merge-relink                 # current directory
+post-merge-relink /path/to/wt     # specific worktree
+```
+
+Hardlinks bind to inodes. When the source worktree runs `composer install`
+after a lock change, child worktrees' `vendor/` keeps pointing at orphaned
+inodes — stale autoload maps and confusing "class not found" errors.
+
+The script relinks whenever it is asked to. It deliberately does not try to
+work out *by itself* whether a relink is needed, because there is no reliable
+local record of which lock a vendor tree was installed from: composer writes
+its `content-hash` into `composer.lock` only, not into
+`vendor/composer/installed.json`. The tempting substitute — comparing this
+worktree's lock against the source worktree's lock — is actively wrong, since
+the two are identical immediately after merging the source in, which is
+exactly when the hardlinks have gone stale. The caller supplies the evidence:
+the hook's `git diff` check is the gate.
+
+### Automatic relinking (git hooks)
+
+`gaw --init` installs two hooks into `.bare/hooks/`:
+
+- `post-merge` — after `git merge` / `git pull`
+- `post-rewrite` — after `git rebase` / commit rewrites
+
+Worktrees share the bare repo's hooks directory, so one install covers every
+worktree in the bundle. Both run the same body
+(`hooks/relink-vendor-if-lock-changed`), which gates on one cheap check:
+
+```
+git diff --name-only HEAD@{1} HEAD | grep -qx composer.lock
+```
+
+Only a changed `composer.lock` can invalidate `vendor/`, so any other merge
+costs one `git diff` and nothing else. The hook exits silently when
+`post-merge-relink` is not on `PATH` (a fresh clone on another machine).
+
+### `worktree-lib`
+
+Sourced, not executed. Single source of truth for the two questions shared by
+`setup-worktree` and `post-merge-relink`:
+
+- `find_bundle_root <dir>` — walks *up* looking for `.bare/`, so worktrees
+  created outside the bundle (`gaw -b feat/x ../elsewhere`) still resolve.
+- `find_peer_worktree <bundle>` — the worktree to hardlink packages from: the
+  first of `master`, `develop` whose `vendor/` is a real directory containing
+  `autoload.php`.
+
 ### `setup-worktree`
 
 Standalone setup logic that can be run from any existing worktree root.

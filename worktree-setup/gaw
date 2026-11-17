@@ -9,6 +9,10 @@ set -euo pipefail
 # ---- Helpers ----
 warn() { printf "  \e[33m⚠\e[0m %s\n" "$1" >&2; }
 
+# Resolve this script's real location so hooks/ is found even when gaw is
+# invoked through the ~/.local/bin symlink.
+SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
 # ---- Init helper ----
 # Used by --init to bootstrap a bare repo + .git pointer at the bundle root.
 # Usage: do_init [<path>] [<url>]
@@ -70,6 +74,28 @@ do_init() {
         echo "  ✓ remote.origin.fetch already set"
     fi
 
+    # ---- 4. Git hooks ----
+    # post-merge / post-rewrite re-link hardlinked vendor/ when a merge, pull
+    # or rebase brings in a new composer.lock. Worktrees share the bare repo's
+    # hooks directory, so one install covers every worktree in the bundle.
+    HOOK_SRC="$SCRIPT_DIR/hooks/relink-vendor-if-lock-changed"
+    if [ -f "$HOOK_SRC" ]; then
+        mkdir -p .bare/hooks
+        for hook in post-merge post-rewrite; do
+            hook_target=".bare/hooks/$hook"
+            if [ -L "$hook_target" ] && [ "$(readlink "$hook_target")" = "$HOOK_SRC" ]; then
+                echo "  ✓ $hook hook already installed"
+            elif [ -e "$hook_target" ] && [ ! -L "$hook_target" ]; then
+                warn "$hook_target exists as a real file — skipping (delete it first)"
+            else
+                ln -sf "$HOOK_SRC" "$hook_target"
+                echo "  ✓ Installed $hook hook (relinks vendor when composer.lock changes)"
+            fi
+        done
+    else
+        warn "hooks/relink-vendor-if-lock-changed not found — skipping hook install"
+    fi
+
     echo ""
     echo "Ready. You can now create worktrees:"
     echo "  gaw develop"
@@ -84,8 +110,9 @@ do_init() {
     echo "  gaw feat/my-feature"
     echo ""
     echo "setup-worktree hardlink-copies vendor/ and node_modules/ from"
-    echo "master into each new worktree (copy-on-write: shared package code,"
-    echo "per-worktree composer data), so child worktrees are cheap to create."
+    echo "the master worktree (or develop, if there is no master) into each"
+    echo "new worktree (copy-on-write: shared package code, per-worktree"
+    echo "composer data), so child worktrees are cheap to create."
     echo ""
     exit 0
 }
@@ -100,7 +127,9 @@ All unrecognised arguments are passed through to 'git worktree add'.
 Options:
   --init [<path>]           Ensure .git pointer exists at <path> (defaults to
                               current directory). Checks .bare/ exists first and
-                              instructs you to clone it if not.
+                              instructs you to clone it if not. Also installs the
+                              post-merge/post-rewrite hooks that re-link vendor
+                              when a merge or rebase changes composer.lock.
   --full-install            Install packages directly instead of hardlink sharing
   --no-packages             Skip all package handling entirely
   --key                     Auto-generate application key (passes through to setup-worktree)

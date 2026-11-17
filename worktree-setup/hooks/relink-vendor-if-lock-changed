@@ -1,0 +1,38 @@
+#!/bin/bash
+# relink-vendor-if-lock-changed — git hook body for post-merge and post-rewrite
+#
+# Installed as .bare/hooks/post-merge and .bare/hooks/post-rewrite by
+# `gaw --init`. Worktrees share one hooks directory (the bare repo's), so a
+# single install covers every worktree in the bundle.
+#
+# Purpose: setup-worktree hardlink-copies vendor/ from the package source.
+# Hardlinks bind to inodes, so when a merge or rebase brings in a new
+# composer.lock, `composer install` replaces those files and the child
+# worktree silently keeps pointing at orphaned inodes — producing stale
+# autoload maps and baffling "class not found" errors.
+#
+# The gate is deliberate: only a change that touches composer.lock can
+# invalidate vendor/, so every other merge costs one `git diff` and nothing
+# else. post-merge-relink then double-checks the lockfiles with md5sum, so a
+# false positive is harmless.
+#
+# Git runs hooks from the root of the working tree, which is the worktree
+# this script needs.
+
+# No -e: a hook must never break the operation that triggered it.
+set -uo pipefail
+
+# Not installed alongside the tooling (fresh clone, another machine) — do
+# nothing rather than print errors into someone's merge.
+if ! command -v post-merge-relink >/dev/null 2>&1; then
+    exit 0
+fi
+
+# HEAD@{1} is the pre-merge (or pre-rebase) tip. If it doesn't resolve — the
+# very first commit, say — there is nothing to compare against.
+CHANGED="$(git diff --name-only HEAD@{1} HEAD 2>/dev/null)" || exit 0
+
+# Only a changed composer.lock can invalidate hardlinked vendor/.
+printf '%s\n' "$CHANGED" | grep -qx 'composer.lock' || exit 0
+
+post-merge-relink "$PWD"
