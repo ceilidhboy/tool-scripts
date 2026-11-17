@@ -122,6 +122,7 @@ Examples:
   gaw -b feat/hotfix ../my-tree   # new branch feat/hotfix at path ../my-tree
   gaw develop                     # create develop branch + worktree from HEAD
   gaw --detach feat/experiment    # detached worktree
+  gaw --no-ceremony feat/review   # throwaway worktree: no .env/.serena/etc.
 EOF
     exit 0
 }
