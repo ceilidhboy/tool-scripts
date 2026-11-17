@@ -144,3 +144,20 @@ cd ~/programming/tools/tool-scripts
 
 Creates symlinks in `~/.local/bin/`. Run `worktree-setup/uninstall.sh`
 to remove them.
+
+## Tests
+
+Behaviour tests for `worktree-lib`, `post-merge-relink`, the git hooks and
+`gaw --init`:
+
+```bash
+bash worktree-setup/tests/test.sh          # run; exit nonzero on failure
+KEEP=1 bash worktree-setup/tests/test.sh   # keep the fixtures to inspect
+```
+
+Each test builds its own throwaway bare + worktree bundle under `mktemp -d`
+(`tests/build.sh`), so no real project is touched — which matters, because
+these tests delete `vendor/` trees and run merges. Relink decisions are
+asserted against a private copy of the tooling whose `setup-worktree` is a
+stub, so no real composer install runs. The fixtures use fake
+`composer.lock` contents as a result.
