@@ -8,6 +8,13 @@
 
 set -euo pipefail
 
+# Resolve this script's real location, so worktree-lib is found even when
+# setup-worktree is invoked through the ~/.local/bin symlink.
+SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+# shellcheck source=worktree-lib
+. "$SCRIPT_DIR/worktree-lib"
+
 # ---- Config ----
 FRONTEND="auto"   # auto | bun | npm | none
 DRY_RUN=false
@@ -145,17 +152,7 @@ if [ ! -f "$WORKTREE_ROOT/composer.json" ]; then
 fi
 
 # ---- Find bundle root (directory containing .bare/) ----
-BUNDLE_ROOT=""
-target="$WORKTREE_ROOT"
-while [ "$target" != "/" ]; do
-    if [ -d "$target/.bare" ]; then
-        BUNDLE_ROOT="$target"
-        break
-    fi
-    target="$(dirname "$target")"
-done
-
-if [ -z "$BUNDLE_ROOT" ]; then
+if ! BUNDLE_ROOT="$(find_bundle_root "$WORKTREE_ROOT")"; then
     err "Could not find a .bare directory in any parent directory."
     err "Make sure you've cloned the bare repo before creating worktrees:"
     err ""
@@ -413,23 +410,14 @@ case "$PACKAGE_MODE" in
         ;;
 
     auto)
-        # Smart default: look for a peer worktree to hardlink-copy from
-        # Checks master first (preferred), then develop.
-        # Prefers a candidate whose vendor/ is a real directory (not a symlink
-        # pointing at another branch), so every worktree links directly to the
-        # source of truth rather than chaining through an intermediate branch.
-        PACKAGE_SOURCE=""
-        for candidate in "master" "develop"; do
-            candidate_dir="$BUNDLE_ROOT/$candidate"
-            # Hardlink sharing requires a real (non-symlinked) source vendor
-            if [ -f "$candidate_dir/vendor/autoload.php" ] && [ ! -L "$candidate_dir/vendor" ]; then
-                PACKAGE_SOURCE="$candidate_dir"
-                echo "Found package source: $PACKAGE_SOURCE (real packages)"
-                break
-            fi
-        done
-
+        # Smart default: look for a peer worktree to hardlink-copy from.
+        # Resolution rules (master preferred, then develop; real vendor only)
+        # live in worktree-lib so post-merge-relink agrees with this script.
+        if ! PACKAGE_SOURCE="$(find_peer_worktree "$BUNDLE_ROOT")"; then
+            PACKAGE_SOURCE=""
+        fi
         if [ -n "$PACKAGE_SOURCE" ]; then
+            echo "Found package source: $PACKAGE_SOURCE (real packages)"
             echo "--- Sharing packages from $(basename "$PACKAGE_SOURCE") (hardlink copy-on-write) ---"
 
             # vendor: hardlink-copy from the source. Package code is shared at

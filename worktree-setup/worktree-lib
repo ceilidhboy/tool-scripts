@@ -1,0 +1,58 @@
+#!/bin/bash
+# worktree-lib — shared path resolution for gaw's worktree tooling.
+#
+# Source this file; it defines functions and executes nothing. Both
+# setup-worktree and post-merge-relink use it so that "where is the bundle
+# root?" and "which worktree are packages shared from?" have exactly one
+# answer in the codebase.
+#
+#   . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/worktree-lib"
+
+# find_bundle_root <start-dir>
+#   Walks up from <start-dir> towards the filesystem root looking for the
+#   directory that contains .bare/. Prints that directory on success.
+#   Returns 1 if no ancestor has a .bare/ directory.
+#
+#   Walking up (rather than assuming the parent) keeps worktrees created
+#   outside the bundle — gaw -b feat/x ../elsewhere — working correctly.
+find_bundle_root() {
+    local dir="${1:-$PWD}"
+
+    [ -d "$dir" ] || return 1
+    dir="$(cd "$dir" && pwd -P)" || return 1
+
+    while [ "$dir" != "/" ]; do
+        if [ -d "$dir/.bare" ]; then
+            printf '%s\n' "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+
+    return 1
+}
+
+# find_peer_worktree <bundle-root>
+#   Prints the worktree to hardlink packages from: the first of master,
+#   develop whose vendor/ is a real directory containing autoload.php.
+#   Returns 1 if neither qualifies.
+#
+#   master is preferred over develop. A symlinked vendor/ is rejected so
+#   that every worktree links directly to the source of truth instead of
+#   chaining through an intermediate branch.
+find_peer_worktree() {
+    local bundle="${1:-}"
+    local candidate peer
+
+    [ -n "$bundle" ] && [ -d "$bundle" ] || return 1
+
+    for candidate in master develop; do
+        peer="$bundle/$candidate"
+        if [ -f "$peer/vendor/autoload.php" ] && [ ! -L "$peer/vendor" ]; then
+            printf '%s\n' "$peer"
+            return 0
+        fi
+    done
+
+    return 1
+}
