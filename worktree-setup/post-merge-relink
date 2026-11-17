@@ -1,64 +1,87 @@
 #!/usr/bin/env bash
-# post-merge-relink — Re-link vendor after merging master into a worktree.
+# post-merge-relink — Re-link vendor after a merge or rebase changes composer.lock
 #
 # Usage: post-merge-relink [<worktree-path>]
 #        If omitted, uses the current directory.
 #
-# After merging master (or any branch that changes composer.lock), vendor's
-# hardlinks point to inodes that master's composer install no longer references.
-# This script removes vendor and runs setup-worktree to re-establish sharing.
+# setup-worktree hardlink-copies vendor/ from the package source. Hardlinks
+# bind to inodes, so when a merge, pull or rebase brings in a new
+# composer.lock, `composer install` in the source worktree replaces those
+# files and this worktree silently keeps pointing at orphaned inodes —
+# stale autoload maps and baffling "class not found" errors.
 #
 # Rule from §6.1 of the shiftcore handoff:
 #   Whenever a worktree's composer.lock changes — merge, rebase, pull —
 #   re-run `rm -rf vendor && setup-worktree` afterwards.
 #   Merge first, re-link second.
+#
+# Normally run for you by the .bare/hooks/post-merge and post-rewrite hooks
+# that `gaw --init` installs. Run it by hand if you merged before the hooks
+# existed, or if GIT_* variables stopped the hook from firing.
+#
+# "Has composer.lock changed?" is answered by the caller, not in here. The
+# hook knows: `git diff --name-only HEAD@{1} HEAD | grep -qx composer.lock`.
+# This script deliberately does not try to re-derive it, because there is no
+# reliable local record of which lock a vendor tree was installed from —
+# composer writes its content-hash into composer.lock only, not into
+# vendor/composer/installed.json. Comparing this worktree's lock against the
+# source worktree's lock looks like such a test but always "matches" right
+# after merging the source in, which is exactly when the hardlinks have gone
+# stale. So: relink when asked, skip only when there is nothing to relink.
+#
+# The bundle root and package source are resolved by worktree-lib, the same
+# code setup-worktree uses, so this works on bundles with only a develop
+# worktree and on worktrees created outside the bundle.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SELF")"
+
+# shellcheck source=worktree-lib
+. "$SCRIPT_DIR/worktree-lib"
+
+fail() {
+    printf 'Error: %s\n' "$1" >&2
+    exit 1
+}
+
 WORKTREE_ROOT="${1:-.}"
-BUNDLE_ROOT="$(cd "$WORKTREE_ROOT/.." && pwd)"
 
-# Resolve to absolute path
-WORKTREE_ROOT="$(cd "$WORKTREE_ROOT" && pwd)"
+[ -e "$WORKTREE_ROOT" ] || fail "No such path: $WORKTREE_ROOT"
+[ -d "$WORKTREE_ROOT" ] || fail "Not a directory: $WORKTREE_ROOT"
+WORKTREE_ROOT="$(cd "$WORKTREE_ROOT" && pwd -P)"
 
-# Validate
-if [ ! -f "$WORKTREE_ROOT/composer.json" ]; then
-    echo "Error: No composer.json found in $WORKTREE_ROOT" >&2
-    exit 1
-fi
+[ -f "$WORKTREE_ROOT/composer.json" ] || fail "No composer.json found in $WORKTREE_ROOT"
+[ -f "$WORKTREE_ROOT/.git" ] || fail "$WORKTREE_ROOT is not a git worktree (.git not found)"
 
-if [ ! -f "$WORKTREE_ROOT/.git" ]; then
-    echo "Error: $WORKTREE_ROOT is not a git worktree (.git not found)" >&2
-    exit 1
-fi
+BUNDLE_ROOT="$(find_bundle_root "$WORKTREE_ROOT")" || fail "Could not find a .bare directory in any parent of $WORKTREE_ROOT.
+Make sure you've cloned the bare repo before creating worktrees:
 
-# Find master's composer.lock
-MASTER_LOCK="$BUNDLE_ROOT/master/composer.lock"
-if [ ! -f "$MASTER_LOCK" ]; then
-    echo "Error: master composer.lock not found at $MASTER_LOCK" >&2
-    exit 1
-fi
+  git clone --bare <url> .bare
+  echo 'gitdir: .bare' > .git"
 
-WORKTREE_LOCK="$WORKTREE_ROOT/composer.lock"
-MASTER_MD5=$(md5sum "$MASTER_LOCK" | cut -d' ' -f1)
-WORKTREE_MD5=$(md5sum "$WORKTREE_LOCK" | cut -d' ' -f1)
-
-if [ "$MASTER_MD5" = "$WORKTREE_MD5" ]; then
-    echo "Lockfiles match — vendor is already in sync with master. No relink needed."
+# A --no-ceremony (review/CI) worktree deliberately has no vendor/. Nothing
+# to re-link, and installing one here would defeat the point of the flag.
+if [ ! -e "$WORKTREE_ROOT/vendor" ]; then
+    echo "No vendor/ in $WORKTREE_ROOT — nothing to relink."
     exit 0
 fi
 
-BRANCH=$(git -C "$WORKTREE_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo "detached")
-echo "Lockfiles differ (branch: $BRANCH). Relinking vendor from master..."
+PEER="$(find_peer_worktree "$BUNDLE_ROOT")" || fail "No package source found under $BUNDLE_ROOT.
+Expected a master or develop worktree whose vendor/ is a real directory.
+Create one first:
 
-# Remove vendor
+  gaw master"
+
+BRANCH=$(git -C "$WORKTREE_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+echo "Re-linking vendor (branch: $BRANCH, source: $(basename "$PEER"))..."
+
 rm -rf "$WORKTREE_ROOT/vendor"
 echo "  Removed vendor/"
 
-# Re-link via setup-worktree
 "$SCRIPT_DIR/setup-worktree" --no-key --no-frontend "$WORKTREE_ROOT"
 
 echo ""
-echo "Done. Vendor relinked from master."
+echo "Done. Vendor relinked from $PEER."
 echo "Verify with: composer install --dry-run | grep 'Nothing to install'"
