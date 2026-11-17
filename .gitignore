@@ -1,1 +1,4 @@
 .idea/
+# No trailing slash: .serena may be a symlink to a directory, and a
+# trailing slash only matches real directories.
+.serena

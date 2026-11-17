@@ -114,7 +114,9 @@ Examples:
   gaw --init                      # ensure .git pointer exists in current dir
   gaw --init ~/projects/my-app    # ensure .git pointer at a specific path
   gaw feat/new-feature            # worktree at feat/new-feature for branch feat/new-feature
-  gaw develop                    # create develop branch + worktree from HEAD
+  gaw ../my-tree feat/hotfix      # <path> first, then <branch>
+  gaw -b feat/hotfix ../my-tree   # new branch feat/hotfix at path ../my-tree
+  gaw develop                     # create develop branch + worktree from HEAD
   gaw --detach feat/experiment    # detached worktree
 EOF
     exit 0
