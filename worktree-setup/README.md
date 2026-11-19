@@ -15,8 +15,14 @@ gaw develop main                  # path + explicit branch
 gaw --detach feat/experiment HEAD~3  # flags pass through to git
 ```
 
-Arguments are forwarded verbatim to `git worktree add`. The path argument
-is extracted to determine where to cd to for the setup step.
+Arguments are split three ways: `gaw`'s own flags (`--init`, `--help`), the
+setup flags (everything in `GAW_SETUP_FLAGS`, defined once in `worktree-lib`),
+and everything else — git's own flags plus the positionals — which goes
+verbatim to `git worktree add`. The path argument is extracted to determine
+where to cd to for the setup step.
+
+Unknown flags fall through to git, which rejects anything it does not
+recognise, so a misrouted flag fails loudly instead of being ignored.
 
 ### `post-merge-relink`
 

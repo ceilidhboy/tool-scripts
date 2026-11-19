@@ -9,9 +9,12 @@ set -euo pipefail
 # ---- Helpers ----
 warn() { printf "  \e[33m⚠\e[0m %s\n" "$1" >&2; }
 
-# Resolve this script's real location so hooks/ is found even when gaw is
-# invoked through the ~/.local/bin symlink.
+# Resolve this script's real location so hooks/ and worktree-lib are found
+# even when gaw is invoked through the ~/.local/bin symlink.
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+# shellcheck source=worktree-lib
+. "$SCRIPT_DIR/worktree-lib"
 
 # ---- Init helper ----
 # Used by --init to bootstrap a bare repo + .git pointer at the bundle root.
@@ -130,16 +133,16 @@ Options:
                               instructs you to clone it if not. Also installs the
                               post-merge/post-rewrite hooks that re-link vendor
                               when a merge or rebase changes composer.lock.
-  --full-install            Install packages directly instead of hardlink sharing
-  --no-packages             Skip all package handling entirely
-  --key                     Auto-generate application key (passes through to setup-worktree)
-  --no-key                  Skip key generation (passes through to setup-worktree)
-  --serena                  Share .serena at bundle root across worktrees (passes through to setup-worktree)
-  --no-ceremony, --review   Skip the development ceremony — .env, .mcp.json, .serena,
-                            storage:link, key:generate, TIA skip-worktree — while still
-                            sharing packages (passes through to setup-worktree). For
-                            throwaway or automated worktrees such as a review.
   --help, -h                Show this help message
+
+Setup flags — passed through to setup-worktree; run 'setup-worktree --help'
+for what each one does. The list is defined once, in worktree-lib:
+EOF
+    printf '  %s\n\n' "${GAW_SETUP_FLAGS[*]}"
+    cat >&1 <<'EOF'
+Everything else is passed to 'git worktree add', so git's own flags (such as
+--detach) work unchanged, and an unrecognised flag is reported by git rather
+than silently ignored.
 
 Configuration: set share_serena=true in ~/.config/gaw/config to enable it by default.
 
@@ -176,6 +179,10 @@ for arg in "$@"; do
 done
 
 # ---- Separate setup-worktree flags from git worktree add flags ----
+# Which flags belong to setup-worktree is defined once, in worktree-lib
+# (GAW_SETUP_FLAGS). Everything else — including unknown flags — is passed
+# to git worktree add, which rejects what it does not recognise, so a
+# misrouted flag fails loudly rather than being silently ignored.
 setup_flags=()
 git_args=()
 path=""
@@ -193,9 +200,6 @@ for arg in "$@"; do
         continue
     fi
     case "$arg" in
-        --full-install|--no-packages|--key|--no-key|--serena|--no-ceremony|--review)
-            setup_flags+=("$arg")
-            ;;
         --help|-h)
             show_help
             ;;
@@ -208,7 +212,11 @@ for arg in "$@"; do
             after_double_dash=true
             ;;
         -*)
-            git_args+=("$arg")
+            if is_setup_flag "$arg"; then
+                setup_flags+=("$arg")
+            else
+                git_args+=("$arg")
+            fi
             ;;
         *)
             if [ -z "$path" ]; then
@@ -218,6 +226,16 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Test seam: show how arguments were routed, without creating anything.
+# Used by tests/test.sh to assert that every setup-worktree flag is routed to
+# setup-worktree and not to git. Not part of the documented CLI.
+if [ -n "${GAW_ROUTE_DEBUG:-}" ]; then
+    printf 'setup_flags=%s\n' "${setup_flags[*]:-}"
+    printf 'git_args=%s\n' "${git_args[*]:-}"
+    printf 'path=%s\n' "$path"
+    exit 0
+fi
 
 if [ -z "$path" ]; then
     echo "Error: no path specified." >&2

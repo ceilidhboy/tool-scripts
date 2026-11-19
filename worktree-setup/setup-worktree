@@ -59,6 +59,8 @@ Options:
   --npm             Force npm install (even without package-lock.json)
   --no-frontend     Skip frontend dependency install
   --no-serena       Skip sharing .serena at bundle root (default: share)
+  --serena          Share .serena at bundle root, overriding share_serena=false
+                    in ~/.config/gaw/config for this invocation
   --no-ceremony     Skip the development ceremony: .env, .mcp.json, .serena,
                     storage:link, key:generate and TIA skip-worktree. Package
                     sharing still runs. Intended for throwaway or automated
@@ -107,6 +109,7 @@ while [ $# -gt 0 ]; do
         --npm)           FRONTEND="npm";              shift ;;
         --no-frontend)   FRONTEND="none";             shift ;;
         --no-serena)     SERENA_SHARE="false";         shift ;;
+        --serena)        SERENA_SHARE="true";          shift ;;
         --no-ceremony|--review) CEREMONY="none";        shift ;;
         --dry-run)       DRY_RUN=true;                shift ;;
         --help|-h)       show_help ;;

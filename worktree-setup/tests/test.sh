@@ -36,6 +36,50 @@ t() {  # t <name> <0 for pass>
 
 section() { printf '\n=== %s ===\n' "$1"; }
 
+# ---------------------------------------------------------------- flag routing
+section "setup flag list is single-sourced (worktree-lib)"
+
+lib_flags=$(bash -c "source '$REPO/worktree-lib' && printf '%s\n' \"\${GAW_SETUP_FLAGS[@]}\"")
+help_flags=$("$REPO/setup-worktree" --help | grep -E '^  --' | grep -oE -- '--[a-z][a-z-]+' | sort -u | grep -vx -- '--help')
+
+t "worktree-lib defines a setup flag list" $([ -n "$lib_flags" ] && echo 0 || echo 1)
+
+# every flag setup-worktree documents must be in the list
+missing=0
+for f in $help_flags; do
+    printf '%s\n' "$lib_flags" | grep -qx -- "$f" || { missing=1; echo "    not in GAW_SETUP_FLAGS: $f"; }
+done
+t "every flag in 'setup-worktree --help' is in GAW_SETUP_FLAGS" $missing
+
+# and every listed flag must actually be documented and accepted
+undocumented=0; unaccepted=0; unrouted=0
+for f in $lib_flags; do
+    printf '%s\n' "$help_flags" | grep -qx -- "$f" || { undocumented=1; echo "    not documented in --help: $f"; }
+    "$REPO/setup-worktree" "$f" --help >/dev/null 2>&1 || { unaccepted=1; echo "    parser rejects: $f"; }
+    route=$(GAW_ROUTE_DEBUG=1 "$REPO/gaw" "$f" /tmp/x | sed -n 's/^setup_flags=//p' | tr ' ' '\n' | grep -cx -- "$f")
+    [ "$route" -eq 1 ] || { unrouted=1; echo "    gaw routes to git, not setup: $f"; }
+done
+t "every GAW_SETUP_FLAGS entry is documented" $undocumented
+t "every GAW_SETUP_FLAGS entry is accepted by setup-worktree" $unaccepted
+t "every GAW_SETUP_FLAGS entry is routed to setup-worktree by gaw" $unrouted
+
+# the other direction: git flags and unknown flags stay with git
+out=$(GAW_ROUTE_DEBUG=1 "$REPO/gaw" --detach --frobnicate -b mybranch ./wt)
+t "git flags are routed to git worktree add" $(echo "$out" | sed -n 's/^git_args=//p' | tr ' ' '\n' | grep -qx -- '--detach' && echo 0 || echo 1)
+t "unknown flags fall through to git (loud failure, not silent)" $(echo "$out" | sed -n 's/^git_args=//p' | tr ' ' '\n' | grep -qx -- '--frobnicate' && echo 0 || echo 1)
+t "value-taking git flags keep their value" $(echo "$out" | sed -n 's/^git_args=//p' | grep -q -- '-b mybranch' && echo 0 || echo 1)
+t "the path is still detected from positionals" $(echo "$out" | sed -n 's/^path=//p' | grep -qx -- './wt' && echo 0 || echo 1)
+
+
+# --serena must actually override share_serena=false from the config file
+bash "$BUILD" "$T/serena" >/dev/null
+SB="$T/serena/bundle"
+git -C "$SB" worktree add -q -b feat/s "$SB/feat/s" master
+printf 'share_serena=false\n' > "$T/gaw-config"
+on=$( cd "$SB/feat/s" && GAW_CONFIG="$T/gaw-config" "$REPO/setup-worktree" --serena --dry-run . 2>&1 | grep -c ".serena" )
+off=$( cd "$SB/feat/s" && GAW_CONFIG="$T/gaw-config" "$REPO/setup-worktree" --dry-run . 2>&1 | grep -c ".serena" )
+t "--serena overrides share_serena=false from config (off=$off, on=$on)" $([ "$on" -gt "$off" ] && echo 0 || echo 1)
+
 # ---------------------------------------------------------------- helper
 section "helper: bundle root + peer resolution"
 bash "$BUILD" "$T/with-master" >/dev/null

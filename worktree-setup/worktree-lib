@@ -56,3 +56,28 @@ find_peer_worktree() {
 
     return 1
 }
+
+# ---- The setup flag list ----
+# Flags that belong to setup-worktree. gaw must route these to setup-worktree
+# rather than passing them to `git worktree add`, which rejects everything it
+# does not recognise. This array is the only definition of that set: gaw
+# routes by membership of it, setup-worktree implements the effects, and
+# tests/test.sh asserts that the two stay in agreement — so adding a flag in
+# one place without the other fails the suite instead of failing a user.
+GAW_SETUP_FLAGS=(
+    --full-install --no-packages
+    --key --no-key
+    --bun --npm --no-frontend
+    --serena --no-serena
+    --no-ceremony --review
+    --dry-run
+)
+
+# is_setup_flag <flag>  — true (0) if <flag> belongs to setup-worktree.
+is_setup_flag() {
+    local flag
+    for flag in "${GAW_SETUP_FLAGS[@]}"; do
+        [ "$flag" = "${1:-}" ] && return 0
+    done
+    return 1
+}
